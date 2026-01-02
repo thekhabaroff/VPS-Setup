@@ -13,31 +13,31 @@ echo -e "${BLUE}=== ЗАПУСК СКРИПТА ===${NC}"
 set -e
 
 # --- 1. Обновление базовой системы ---
-echo -e "${GREEN}=== ОБНОВЛЕНИЕ ПАКЕТОВ ==="
+echo -e "${GREEN}=== ОБНОВЛЕНИЕ ПАКЕТОВ ===${NC}"
 sudo apt update
 
-echo -e "${GREEN}=== ПОЛНОЕ ОБНОВЛЕНИЕ СИСТЕМЫ ==="
+echo -e "${GREEN}=== ПОЛНОЕ ОБНОВЛЕНИЕ СИСТЕМЫ ===${NC}"
 sudo apt full-upgrade -y
 
 # --- 2. Обновление менеджеров пакетов ---
-echo -e "${GREEN}=== ОБНОВЛЕНИЕ SNAP ==="
+echo -e "${GREEN}=== ОБНОВЛЕНИЕ SNAP ===${NC}"
 if command -v snap &> /dev/null; then
     sudo snap refresh
 else
-    echo -e "${YELLOW}>>> Snap не установлен, пропускаем."
+    echo -e "${YELLOW}>>> Snap не установлен, пропускаем.${NC}"
 fi
 
-echo -e "${GREEN}=== УСТАНОВКА FLATPAK (ЕСЛИ НЕ УСТАНОВЛЕН) ==="
+echo -e "${GREEN}=== УСТАНОВКА FLATPAK (ЕСЛИ НЕ УСТАНОВЛЕН) ===${NC}"
 if ! command -v flatpak &> /dev/null; then
     echo -e "${YELLOW}>>> Установка Flatpak...${NC}"
     sudo apt install -y flatpak
 fi
 
-echo -e "${GREEN}=== ОБНОВЛЕНИЕ FLATPAK ==="
+echo -e "${GREEN}=== ОБНОВЛЕНИЕ FLATPAK ===${NC}"
 sudo flatpak update -y
 
 # --- 3. Docker ---
-echo -e "${GREEN}=== УСТАНОВКА | ОБНОВЛЕНИЕ DOCKER ==="
+echo -e "${GREEN}=== УСТАНОВКА | ОБНОВЛЕНИЕ DOCKER ===${NC}"
 if ! command -v docker &> /dev/null; then
     echo -e "${YELLOW}>>> Установка Docker...${NC}"
     curl -fsSL https://get.docker.com -o get-docker.sh
@@ -125,16 +125,16 @@ EOF
 sudo sysctl -p /etc/sysctl.d/99-custom.conf
 echo -e "${YELLOW}>>> BBR и оптимизации применены.${NC}"
 
-echo -e "${GREEN}== ОЧИСТКА НЕИСПОЛЬЗУЕМЫХ ПАКЕТОВ ==="
+echo -e "${GREEN}== ОЧИСТКА НЕИСПОЛЬЗУЕМЫХ ПАКЕТОВ ===${NC}"
 sudo apt autoremove -y
 
-echo -e "${GREEN}=== ОЧИСТКА КЭША ==="
+echo -e "${GREEN}=== ОЧИСТКА КЭША ===${NC}"
 sudo apt autoclean
 
-echo -e "${GREEN}=== ОЧИСТКА ЛОГОВ ==="
+echo -e "${GREEN}=== ОЧИСТКА ЛОГОВ ===${NC}"
 sudo journalctl --vacuum-time=1week
 
-echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ==="
+echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ===${NC}"
 echo -e "${BLUE}=== ВСЕ ГОТОВО! ПЕРЕЗАГРУЗКА ЧЕРЕЗ 5 СЕКУНД ===${NC}"
 sleep 5
 sudo reboot
