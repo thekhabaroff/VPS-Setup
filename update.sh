@@ -13,31 +13,31 @@ echo -e "${BLUE}=== ЗАПУСК СКРИПТА ===${NC}"
 set -e
 
 # --- 1. Обновление базовой системы ---
-echo -e "${GREEN}"=== ОБНОВЛЕНИЕ ПАКЕТОВ ==="
+echo -e "${GREEN}=== ОБНОВЛЕНИЕ ПАКЕТОВ ==="
 sudo apt update
 
-echo -e "${GREEN}"=== ПОЛНОЕ ОБНОВЛЕНИЕ СИСТЕМЫ ==="
+echo -e "${GREEN}=== ПОЛНОЕ ОБНОВЛЕНИЕ СИСТЕМЫ ==="
 sudo apt full-upgrade -y
 
 # --- 2. Обновление менеджеров пакетов ---
-echo -e "${GREEN}"=== ОБНОВЛЕНИЕ SNAP ==="
+echo -e "${GREEN}=== ОБНОВЛЕНИЕ SNAP ==="
 if command -v snap &> /dev/null; then
     sudo snap refresh
 else
-    echo -e "${YELLOW}">>> Snap не установлен, пропускаем."
+    echo -e "${YELLOW}>>> Snap не установлен, пропускаем."
 fi
 
-echo -e "${GREEN}"=== УСТАНОВКА FLATPAK (ЕСЛИ НЕ УСТАНОВЛЕН) ==="
+echo -e "${GREEN}=== УСТАНОВКА FLATPAK (ЕСЛИ НЕ УСТАНОВЛЕН) ==="
 if ! command -v flatpak &> /dev/null; then
     echo -e "${YELLOW}>>> Установка Flatpak...${NC}"
     sudo apt install -y flatpak
 fi
 
-echo -e "${GREEN}"=== ОБНОВЛЕНИЕ FLATPAK ==="
+echo -e "${GREEN}=== ОБНОВЛЕНИЕ FLATPAK ==="
 sudo flatpak update -y
 
 # --- 3. Docker ---
-echo -e "${GREEN}"=== УСТАНОВКА | ОБНОВЛЕНИЕ DOCKER ==="
+echo -e "${GREEN}=== УСТАНОВКА | ОБНОВЛЕНИЕ DOCKER ==="
 if ! command -v docker &> /dev/null; then
     echo -e "${YELLOW}>>> Установка Docker...${NC}"
     curl -fsSL https://get.docker.com -o get-docker.sh
@@ -49,7 +49,7 @@ else
     echo -e "${YELLOW}>>> Docker уже установлен.${NC}"
 fi
 
-# --- 4. Установка полезных утилит (из vps-setup) ---
+# --- 4. Установка полезных утилит ---
 echo -e "${GREEN}>>> УСТАНОВКА УТИЛИТ (curl, wget, git, htop, speedtest, fail2ban and unzip)${NC}"
 sudo apt install -y curl wget git htop fail2ban unzip speedtest-cli
 
@@ -119,20 +119,22 @@ net.ipv6.conf.lo.disable_ipv6 = 1
 # Читать сокеты в цикле 50 микросекунд (рекомендуемое значение)
 net.core.busy_read = 50
 net.core.busy_poll = 50
+EOF
+
 # Применяем настройки
 sudo sysctl -p /etc/sysctl.d/99-custom.conf
 echo -e "${YELLOW}>>> BBR и оптимизации применены.${NC}"
 
-echo -e "${GREEN}"== ОЧИСТКА НЕИСПОЛЬЗУЕМЫХ ПАКЕТОВ ==="
+echo -e "${GREEN}== ОЧИСТКА НЕИСПОЛЬЗУЕМЫХ ПАКЕТОВ ==="
 sudo apt autoremove -y
 
-echo -e "${GREEN}"=== ОЧИСТКА КЭША ==="
+echo -e "${GREEN}=== ОЧИСТКА КЭША ==="
 sudo apt autoclean
 
-echo -e "${GREEN}"=== ОЧИСТКА ЛОГОВ ==="
+echo -e "${GREEN}=== ОЧИСТКА ЛОГОВ ==="
 sudo journalctl --vacuum-time=1week
 
-echo -e "${GREEN}"=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ==="
+echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ==="
 echo -e "${BLUE}=== ВСЕ ГОТОВО! ПЕРЕЗАГРУЗКА ЧЕРЕЗ 5 СЕКУНД ===${NC}"
 sleep 5
 sudo reboot
