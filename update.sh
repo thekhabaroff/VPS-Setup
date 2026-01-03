@@ -48,6 +48,8 @@ if ! command -v docker &> /dev/null; then
 else
     echo -e "${YELLOW}>>> Docker уже установлен.${NC}"
 fi
+# Убедимся, что стоит плагин Compose
+sudo apt install -y docker-compose-plugin
 
 # --- 4. Установка полезных утилит ---
 echo -e "${GREEN}>>> УСТАНОВКА УТИЛИТ (curl, wget, git, htop, speedtest, fail2ban and unzip)${NC}"
