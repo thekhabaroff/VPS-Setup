@@ -75,4 +75,121 @@ if ! command -v docker &> /dev/null; then
         spinner $! "Установка Docker"
         rm get-docker.sh
         sudo usermod -aG docker $USER > /dev/null 2>&1
-        echo -e "${GREEN}>>> Docker успешно установ
+        echo -e "${GREEN}>>> Docker успешно установлен.${NC}"
+    else
+        echo -e "${YELLOW}>>> Установка Docker пропущена.${NC}"
+    fi
+else
+    echo -e "${YELLOW}>>> Docker уже установлен.${NC}"
+fi
+
+# Убедимся, что стоит плагин Compose (только если Docker установлен)
+if command -v docker &> /dev/null; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq docker-compose-plugin > /dev/null 2>&1 &
+    spinner $! "Установка Docker Compose плагина"
+fi
+
+# --- 3. Установка утилит ---
+echo -e "${GREEN}=== УСТАНОВКА УТИЛИТ ===${NC}"
+
+# Базовые утилиты
+install_util "curl" "загрузка файлов из интернета"
+install_util "wget" "альтернатива curl для загрузки файлов"
+install_util "git" "система контроля версий"
+install_util "unzip" "распаковка ZIP архивов"
+install_util "zip" "создание ZIP архивов"
+
+# Мониторинг
+install_util "htop" "интерактивный монитор процессов"
+
+# Сеть
+install_util "speedtest-cli" "тест скорости интернета"
+install_util "net-tools" "сетевые утилиты (ifconfig, netstat)"
+install_util "mtr" "диагностика сети (ping + traceroute)"
+install_util "traceroute" "трассировка маршрута"
+install_util "nmap" "сканер сети и портов"
+
+# Безопасность
+install_util "fail2ban" "защита от брутфорса"
+install_util "ufw" "упрощённый firewall"
+
+# --- 4. Оптимизация сети и ядра (BBR + Sysctl) ---
+echo -e "${GREEN}=== ОПТИМИЗАЦИЯ ЯДРА ===${NC}"
+
+# Бэкап конфига
+if [ ! -f /etc/sysctl.conf.bak ]; then
+    sudo cp /etc/sysctl.conf /etc/sysctl.conf.bak
+fi
+
+cat <<'EOF' | sudo tee /etc/sysctl.d/99-custom.conf > /dev/null
+# --- SYSTEM & BBR ---
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+# --- NETWORK QUEUES ---
+net.core.netdev_max_backlog = 2000
+net.core.somaxconn = 2048
+net.ipv4.tcp_max_syn_backlog = 2048
+
+# --- MEMORY BUFFERS ---
+net.core.rmem_default = 212992
+net.core.rmem_max = 6291456
+net.core.wmem_default = 212992
+net.core.wmem_max = 6291456
+net.core.optmem_max = 65536
+net.ipv4.tcp_rmem = 4096 131072 6291456
+net.ipv4.tcp_wmem = 4096 131072 6291456
+
+# --- TIMEOUTS & FAST OPEN ---
+net.ipv4.tcp_keepalive_time = 300
+net.ipv4.tcp_keepalive_intvl = 15
+net.ipv4.tcp_keepalive_probes = 3
+
+# --- CONNECTION OPTIMIZATIONS ---
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_low_latency = 1
+
+# --- MTU & DISCOVERY ---
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.ip_no_pmtu_disc = 0
+
+# --- PORTS & FILES ---
+net.ipv4.ip_local_port_range = 1024 65535
+fs.file-max = 100000
+
+# --- DISABLE IPV6 ---
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+
+# --- SOCKET POLLING ---
+net.core.busy_read = 50
+net.core.busy_poll = 50
+EOF
+
+sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
+echo -e "${GREEN}>>> BBR и оптимизации применены ✓${NC}"
+
+# --- 5. Очистка ---
+echo -e "${GREEN}=== ОЧИСТКА СИСТЕМЫ ===${NC}"
+sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yqq > /dev/null 2>&1 &
+spinner $! "Удаление неиспользуемых пакетов"
+
+sudo apt-get autoclean -qq > /dev/null 2>&1 &
+spinner $! "Очистка кэша пакетов"
+
+sudo journalctl --vacuum-time=1week > /dev/null 2>&1 &
+spinner $! "Очистка старых логов"
+
+echo -e "${BLUE}=== ВСЕ ГОТОВО! ===${NC}"
+
+# --- 6. Перезагрузка ---
+if confirm "Перезагрузить систему сейчас?"; then
+    echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ЧЕРЕЗ 5 СЕКУНД ===${NC}"
+    sleep 5
+    sudo reboot
+else
+    echo -e "${YELLOW}>>> Перезагрузка отложена. Рекомендуется перезагрузить систему вручную.${NC}"
+fi
