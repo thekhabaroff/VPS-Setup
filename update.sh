@@ -19,6 +19,24 @@ confirm() {
     done
 }
 
+# --- Функция для установки утилиты с подтверждением ---
+install_util() {
+    local package=$1
+    local description=$2
+    
+    if ! command -v $package &> /dev/null; then
+        if confirm "Установить $package ($description)?"; then
+            echo -e "${YELLOW}>>> Установка $package...${NC}"
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq $package > /dev/null 2>&1
+            echo -e "${GREEN}>>> $package установлен.${NC}"
+        else
+            echo -e "${YELLOW}>>> Установка $package пропущена.${NC}"
+        fi
+    else
+        echo -e "${YELLOW}>>> $package уже установлен.${NC}"
+    fi
+}
+
 echo -e "${BLUE}=== ЗАПУСК СКРИПТА ===${NC}"
 
 # Останавливаем выполнение скрипта при ошибке любой из команд
@@ -55,9 +73,27 @@ if command -v docker &> /dev/null; then
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq docker-compose-plugin > /dev/null 2>&1
 fi
 
-# --- 3. Установка полезных утилит ---
-echo -e "${GREEN}>>> УСТАНОВКА УТИЛИТ (curl, wget, git, htop, speedtest, fail2ban, unzip)${NC}"
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq curl wget git htop fail2ban unzip speedtest-cli > /dev/null 2>&1
+# --- 3. Установка утилит ---
+echo -e "${GREEN}=== УСТАНОВКА УТИЛИТ ===${NC}"
+
+# Базовые утилиты
+install_util "curl" "загрузка файлов из интернета"
+install_util "wget" "альтернатива curl для загрузки файлов"
+install_util "git" "система контроля версий"
+install_util "unzip" "распаковка ZIP архивов"
+install_util "zip" "создание ZIP архивов"
+
+# Мониторинг
+install_util "htop" "интерактивный монитор процессов"
+
+# Сеть
+install_util "speedtest-cli" "тест скорости интернета"
+install_util "net-tools" "сетевые утилиты (ifconfig, netstat)"
+install_util "mtr" "диагностика сети (ping + traceroute)"
+install_util "traceroute" "трассировка маршрута"
+
+# Безопасность
+install_util "ufw" "упрощённый firewall"
 
 # --- 4. Оптимизация сети и ядра (BBR + Sysctl) ---
 echo -e "${GREEN}>>> Настройка ядра (BBR и оптимизация)...${NC}"
