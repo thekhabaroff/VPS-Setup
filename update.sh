@@ -7,10 +7,22 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# --- Функция для запроса подтверждения ---
+confirm() {
+    while true; do
+        read -p "$1 (y/n): " yn
+        case $yn in
+            [Yy]* ) return 0;;
+            [Nn]* ) return 1;;
+            * ) echo -e "${YELLOW}Пожалуйста, введите y (да) или n (нет).${NC}";;
+        esac
+    done
+}
+
 echo -e "${BLUE}=== ЗАПУСК СКРИПТА ===${NC}"
 
 # Останавливаем выполнение скрипта при ошибке любой из команд
-set -e
+set -euo pipefail
 
 # --- 1. Обновление базовой системы ---
 echo -e "${GREEN}=== ОБНОВЛЕНИЕ ПАКЕТОВ ===${NC}"
@@ -39,17 +51,25 @@ sudo flatpak update -y
 # --- 3. Docker ---
 echo -e "${GREEN}=== УСТАНОВКА | ОБНОВЛЕНИЕ DOCKER ===${NC}"
 if ! command -v docker &> /dev/null; then
-    echo -e "${YELLOW}>>> Установка Docker...${NC}"
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sudo sh get-docker.sh
-    rm get-docker.sh
-    # Добавляем текущего пользователя в группу docker (чтобы не писать sudo docker)
-    sudo usermod -aG docker $USER
+    if confirm "Docker не установлен. Установить Docker?"; then
+        echo -e "${YELLOW}>>> Установка Docker...${NC}"
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sudo sh get-docker.sh
+        rm get-docker.sh
+        # Добавляем текущего пользователя в группу docker (чтобы не писать sudo docker)
+        sudo usermod -aG docker $USER
+        echo -e "${GREEN}>>> Docker успешно установлен.${NC}"
+    else
+        echo -e "${YELLOW}>>> Установка Docker пропущена.${NC}"
+    fi
 else
     echo -e "${YELLOW}>>> Docker уже установлен.${NC}"
 fi
-# Убедимся, что стоит плагин Compose
-sudo apt install -y docker-compose-plugin
+
+# Убедимся, что стоит плагин Compose (только если Docker установлен)
+if command -v docker &> /dev/null; then
+    sudo apt install -y docker-compose-plugin
+fi
 
 # --- 4. Установка полезных утилит ---
 echo -e "${GREEN}>>> УСТАНОВКА УТИЛИТ (curl, wget, git, htop, speedtest, fail2ban and unzip)${NC}"
@@ -63,7 +83,7 @@ if [ ! -f /etc/sysctl.conf.bak ]; then
     sudo cp /etc/sysctl.conf /etc/sysctl.conf.bak
 fi
 
-cat <<EOF | sudo tee /etc/sysctl.d/99-custom.conf
+cat <<EOF | sudo tee /etc/sysctl.d/99-custom.conf > /dev/null
 # --- SYSTEM & BBR ---
 # Включаем BBR (стабилизация пинга)
 net.core.default_qdisc = fq
@@ -124,10 +144,10 @@ net.core.busy_poll = 50
 EOF
 
 # Применяем настройки
-sudo sysctl -p /etc/sysctl.d/99-custom.conf
+sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null
 echo -e "${YELLOW}>>> BBR и оптимизации применены.${NC}"
 
-echo -e "${GREEN}== ОЧИСТКА НЕИСПОЛЬЗУЕМЫХ ПАКЕТОВ ===${NC}"
+echo -e "${GREEN}=== ОЧИСТКА НЕИСПОЛЬЗУЕМЫХ ПАКЕТОВ ===${NC}"
 sudo apt autoremove -y
 
 echo -e "${GREEN}=== ОЧИСТКА КЭША ===${NC}"
@@ -136,7 +156,12 @@ sudo apt autoclean
 echo -e "${GREEN}=== ОЧИСТКА ЛОГОВ ===${NC}"
 sudo journalctl --vacuum-time=1week
 
-echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ===${NC}"
-echo -e "${BLUE}=== ВСЕ ГОТОВО! ПЕРЕЗАГРУЗКА ЧЕРЕЗ 5 СЕКУНД ===${NC}"
-sleep 5
-sudo reboot
+echo -e "${BLUE}=== ВСЕ ГОТОВО! ===${NC}"
+
+if confirm "Перезагрузить систему сейчас?"; then
+    echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ЧЕРЕЗ 5 СЕКУНД ===${NC}"
+    sleep 5
+    sudo reboot
+else
+    echo -e "${YELLOW}>>> Перезагрузка отложена. Рекомендуется перезагрузить систему вручную для применения всех изменений.${NC}"
+fi
