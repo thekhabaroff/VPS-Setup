@@ -26,38 +26,21 @@ set -euo pipefail
 
 # --- 1. Обновление базовой системы ---
 echo -e "${GREEN}=== ОБНОВЛЕНИЕ ПАКЕТОВ ===${NC}"
-sudo apt update
+sudo apt-get update -qq > /dev/null 2>&1
 
 echo -e "${GREEN}=== ПОЛНОЕ ОБНОВЛЕНИЕ СИСТЕМЫ ===${NC}"
-sudo apt full-upgrade -y
+sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -yqq > /dev/null 2>&1
 
-# --- 2. Обновление менеджеров пакетов ---
-echo -e "${GREEN}=== ОБНОВЛЕНИЕ SNAP ===${NC}"
-if command -v snap &> /dev/null; then
-    sudo snap refresh
-else
-    echo -e "${YELLOW}>>> Snap не установлен, пропускаем.${NC}"
-fi
-
-echo -e "${GREEN}=== УСТАНОВКА FLATPAK (ЕСЛИ НЕ УСТАНОВЛЕН) ===${NC}"
-if ! command -v flatpak &> /dev/null; then
-    echo -e "${YELLOW}>>> Установка Flatpak...${NC}"
-    sudo apt install -y flatpak
-fi
-
-echo -e "${GREEN}=== ОБНОВЛЕНИЕ FLATPAK ===${NC}"
-sudo flatpak update -y
-
-# --- 3. Docker ---
+# --- 2. Docker ---
 echo -e "${GREEN}=== УСТАНОВКА | ОБНОВЛЕНИЕ DOCKER ===${NC}"
 if ! command -v docker &> /dev/null; then
     if confirm "Docker не установлен. Установить Docker?"; then
         echo -e "${YELLOW}>>> Установка Docker...${NC}"
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        sudo sh get-docker.sh
+        curl -fsSL https://get.docker.com -o get-docker.sh 2>&1 | grep -v "^%" || true
+        sudo sh get-docker.sh > /dev/null 2>&1
         rm get-docker.sh
         # Добавляем текущего пользователя в группу docker (чтобы не писать sudo docker)
-        sudo usermod -aG docker $USER
+        sudo usermod -aG docker $USER > /dev/null 2>&1
         echo -e "${GREEN}>>> Docker успешно установлен.${NC}"
     else
         echo -e "${YELLOW}>>> Установка Docker пропущена.${NC}"
@@ -68,14 +51,15 @@ fi
 
 # Убедимся, что стоит плагин Compose (только если Docker установлен)
 if command -v docker &> /dev/null; then
-    sudo apt install -y docker-compose-plugin
+    echo -e "${YELLOW}>>> Установка Docker Compose плагина...${NC}"
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq docker-compose-plugin > /dev/null 2>&1
 fi
 
-# --- 4. Установка полезных утилит ---
-echo -e "${GREEN}>>> УСТАНОВКА УТИЛИТ (curl, wget, git, htop, speedtest, fail2ban and unzip)${NC}"
-sudo apt install -y curl wget git htop fail2ban unzip speedtest-cli
+# --- 3. Установка полезных утилит ---
+echo -e "${GREEN}>>> УСТАНОВКА УТИЛИТ (curl, wget, git, htop, speedtest, fail2ban, unzip)${NC}"
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq curl wget git htop fail2ban unzip speedtest-cli > /dev/null 2>&1
 
-# --- 5. Оптимизация сети и ядра (BBR + Sysctl) ---
+# --- 4. Оптимизация сети и ядра (BBR + Sysctl) ---
 echo -e "${GREEN}>>> Настройка ядра (BBR и оптимизация)...${NC}"
 
 # Бэкап конфига
@@ -144,20 +128,21 @@ net.core.busy_poll = 50
 EOF
 
 # Применяем настройки
-sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null
+sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
 echo -e "${YELLOW}>>> BBR и оптимизации применены.${NC}"
 
 echo -e "${GREEN}=== ОЧИСТКА НЕИСПОЛЬЗУЕМЫХ ПАКЕТОВ ===${NC}"
-sudo apt autoremove -y
+sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yqq > /dev/null 2>&1
 
 echo -e "${GREEN}=== ОЧИСТКА КЭША ===${NC}"
-sudo apt autoclean
+sudo apt-get autoclean -qq > /dev/null 2>&1
 
 echo -e "${GREEN}=== ОЧИСТКА ЛОГОВ ===${NC}"
-sudo journalctl --vacuum-time=1week
+sudo journalctl --vacuum-time=1week > /dev/null 2>&1
 
 echo -e "${BLUE}=== ВСЕ ГОТОВО! ===${NC}"
 
+# --- 5. Перезагрузка ---
 if confirm "Перезагрузить систему сейчас?"; then
     echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ЧЕРЕЗ 5 СЕКУНД ===${NC}"
     sleep 5
