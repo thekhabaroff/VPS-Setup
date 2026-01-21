@@ -711,16 +711,24 @@ spinner $! "Полная очистка кэша пакетов"
 
 if confirm "Удалить старые версии ядра Linux?"; then
     CURRENT_KERNEL=$(uname -r | sed 's/-generic//')
-    ALL_KERNELS=$(dpkg --list | grep -E 'linux-image-[0-9]' | grep -v "$CURRENT_KERNEL" | awk '{print $2}' | grep -E '^linux-image-[0-9]' | sort -V)
-    KERNEL_COUNT=$(echo "$ALL_KERNELS" | grep -c '^linux-image' || echo 0)
     
-    if [ $KERNEL_COUNT -gt 1 ]; then
-        OLD_KERNELS=$(echo "$ALL_KERNELS" | head -n -1)
-        
-        if [ ! -z "$OLD_KERNELS" ]; then
-            echo "$OLD_KERNELS" | xargs sudo apt-get purge -yqq > /dev/null 2>&1 &
-            spinner $! "Удаление старых версий ядра"
-        fi
+    # Безопасный подсчёт без pipefail
+    set +e
+    OLD_KERNELS=$(dpkg --list 2>/dev/null | \
+                  grep -E 'linux-image-[0-9]' | \
+                  grep -v "$CURRENT_KERNEL" | \
+                  awk '{print $2}' | \
+                  grep -E '^linux-image-[0-9]' | \
+                  sort -V | \
+                  head -n -1)
+    set -e
+    
+    if [ ! -z "$OLD_KERNELS" ] && [ $(echo "$OLD_KERNELS" | wc -l) -gt 0 ]; then
+        # Удаляем по одному ядру для избежания проблем с xargs
+        echo "$OLD_KERNELS" | while read kernel; do
+            sudo apt-get purge -yqq "$kernel" > /dev/null 2>&1
+        done &
+        spinner $! "Удаление старых версий ядра"
     else
         echo -e "${DIM}${INFO} Старых версий ядра не обнаружено.${NC}"
     fi
