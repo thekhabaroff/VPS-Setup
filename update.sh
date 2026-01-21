@@ -247,11 +247,6 @@ net.ipv4.ip_no_pmtu_disc = 0
 net.ipv4.ip_local_port_range = 1024 65535
 fs.file-max = 100000
 
-# --- DISABLE IPV6 ---
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-
 # --- SOCKET POLLING ---
 net.core.busy_read = 50
 net.core.busy_poll = 50
@@ -260,16 +255,78 @@ EOF
 sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
 echo -e "${GREEN}>>> BBR и оптимизации применены ✓${NC}"
 
+# --- Отключение IPv6 через systemd ---
+echo -e "${GREEN}=== ОТКЛЮЧЕНИЕ IPv6 ===${NC}"
+
+if [ ! -f /etc/systemd/system/disable-ipv6.service ]; then
+    if confirm "Отключить IPv6 через systemd сервис?"; then
+        cat << 'EOF' | sudo tee /etc/systemd/system/disable-ipv6.service > /dev/null
+[Unit]
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/sysctl -w net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        
+        sudo systemctl daemon-reload > /dev/null 2>&1
+        sudo systemctl enable --now disable-ipv6.service > /dev/null 2>&1 &
+        spinner $! "Включение сервиса отключения IPv6"
+        echo -e "${GREEN}>>> IPv6 отключен через systemd ✓${NC}"
+    else
+        echo -e "${YELLOW}>>> Отключение IPv6 пропущено.${NC}"
+    fi
+else
+    echo -e "${YELLOW}>>> Сервис disable-ipv6 уже существует.${NC}"
+fi
+
 # --- 6. Очистка ---
 echo -e "${GREEN}=== ОЧИСТКА СИСТЕМЫ ===${NC}"
-sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yqq > /dev/null 2>&1 &
+
+# Удаление неиспользуемых пакетов с зависимостями
+sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -yqq > /dev/null 2>&1 &
 spinner $! "Удаление неиспользуемых пакетов"
 
-sudo apt-get autoclean -qq > /dev/null 2>&1 &
-spinner $! "Очистка кэша пакетов"
+# Полная очистка кэша пакетов (освобождает больше места)
+sudo apt-get clean -qq > /dev/null 2>&1 &
+spinner $! "Полная очистка кэша пакетов"
 
-sudo journalctl --vacuum-time=1week > /dev/null 2>&1 &
-spinner $! "Очистка старых логов"
+# Очистка старых версий ядра (оставляем только текущее и предыдущее)
+if confirm "Удалить старые версии ядра Linux?"; then
+    CURRENT_KERNEL=$(uname -r)
+    OLD_KERNELS=$(dpkg --list | grep -E 'linux-image-[0-9]' | grep -v "$CURRENT_KERNEL" | awk '{print $2}' | sort -V | head -n -1)
+    
+    if [ ! -z "$OLD_KERNELS" ]; then
+        echo "$OLD_KERNELS" | xargs sudo apt-get purge -yqq > /dev/null 2>&1 &
+        spinner $! "Удаление старых версий ядра"
+    else
+        echo -e "${YELLOW}>>> Старых версий ядра не обнаружено.${NC}"
+    fi
+else
+    echo -e "${YELLOW}>>> Очистка ядер пропущена.${NC}"
+fi
+
+# Очистка журналов systemd (комбинация времени и размера)
+sudo journalctl --vacuum-time=7d --vacuum-size=100M > /dev/null 2>&1 &
+spinner $! "Очистка журналов (>7 дней или >100MB)"
+
+# Очистка временных файлов
+sudo rm -rf /tmp/* /var/tmp/* 2>/dev/null
+echo -e "${GREEN}>>> Временные файлы удалены ✓${NC}"
+
+# Очистка кэша thumbnails (если это десктоп)
+if [ -d ~/.cache/thumbnails ]; then
+    rm -rf ~/.cache/thumbnails/* 2>/dev/null
+    echo -e "${GREEN}>>> Кэш миниатюр очищен ✓${NC}"
+fi
+
+# Показываем освобожденное место
+echo -e "${BLUE}>>> Свободное место на диске:${NC}"
+df -h / | tail -n 1 | awk '{print "  Использовано: " $3 " из " $2 " (" $5 ")"}'
 
 echo -e "${BLUE}=== ВСЕ ГОТОВО! ===${NC}"
 
