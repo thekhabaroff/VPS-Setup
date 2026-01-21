@@ -1,9 +1,20 @@
-#!/bin/bash
+!/bin/bash
 
 # ============================================================================
 #  UBUNTU SERVER OPTIMIZATION SCRIPT v2.0
 #  Комплексная оптимизация и настройка сервера
 # ============================================================================
+
+# Проверка прав доступа (требуется root или sudo)
+if [ "$EUID" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+    echo "Ошибка: Этот скрипт требует прав root или sudo."
+    echo "Запустите скрипт с sudo: sudo $0"
+    exit 1
+fi
+
+# Останавливаем выполнение скрипта при ошибке команд
+# (отключаем для некоторых команд, которые могут возвращать ненулевой код)
+set -eo pipefail
 
 # --- Настройки цветов и стилей ---
 RED='\033[0;31m'
@@ -16,43 +27,44 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-# --- Иконки статусов ---
-SUCCESS="✅"
-WARNING="⚠️"
-ERROR="❌"
-INFO="ℹ️"
-SKIP="⏭️"
-CLEAN="🧹"
-SPEED="⚡"
-SECURE="🔒"
+# --- Иконки статусов (ASCII-совместимые) ---
+SUCCESS="[OK]"
+WARNING="[!]"
+ERROR="[X]"
+INFO="[i]"
+SKIP="[>]"
+CLEAN="[*]"
+SPEED="[+]"
+SECURE="[#]"
 
 # --- Переменные для статистики ---
 INSTALLED_UTILS=0
 DISABLED_SERVICES=0
 FREED_SPACE_BEFORE=0
 SCRIPT_START_TIME=$(date +%s)
-TOTAL_SECTIONS=14
+TOTAL_SECTIONS=16
 CURRENT_SECTION=0
 SECTION_START_TIME=0
 AUTO_MODE=false
 MINIMAL_MODE=false
 
-# --- Функция спиннера ---
+# --- Функция спиннера (ASCII-совместимый) ---
 spinner() {
     local pid=$1
     local message=$2
-    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local spin='|/-\'
     local i=0
     local start_time=$(date +%s)
     
-    tput civis
+    tput civis 2>/dev/null || true
     while kill -0 $pid 2>/dev/null; do
         local elapsed=$(($(date +%s) - start_time))
-        i=$(( (i+1) %10 ))
-        printf "\r${YELLOW}${message} ${spin:$i:1} ${CYAN}[${elapsed}s]${NC}"
-        sleep 0.1
+        local spin_char="${spin:$((i % 4)):1}"
+        printf "\r${YELLOW}${message} ${spin_char} ${CYAN}[${elapsed}s]${NC}"
+        i=$((i + 1))
+        sleep 0.2
     done
-    tput cnorm
+    tput cnorm 2>/dev/null || true
     local total_time=$(($(date +%s) - start_time))
     printf "\r${GREEN}${message} ${SUCCESS} ${DIM}(${total_time}s)${NC}\n"
 }
@@ -73,7 +85,7 @@ confirm() {
     done
 }
 
-# --- Функция прогресс-бара ---
+# --- Функция прогресс-бара (ASCII-совместимый) ---
 show_progress() {
     local current=$1
     local total=$2
@@ -82,8 +94,8 @@ show_progress() {
     local filled=$((width * current / total))
     
     echo -ne "${BLUE}["
-    printf "%${filled}s" | tr ' ' '█'
-    printf "%$((width - filled))s" | tr ' ' '░'
+    printf "%${filled}s" | tr ' ' '='
+    printf "%$((width - filled))s" | tr ' ' '-'
     echo -e "] ${BOLD}${percentage}%%${NC} ${DIM}(${current}/${total})${NC}"
 }
 
@@ -93,21 +105,132 @@ section_start() {
     SECTION_START_TIME=$(date +%s)
     
     echo ""
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}================================================================${NC}"
     show_progress $CURRENT_SECTION $TOTAL_SECTIONS
-    echo -e "${GREEN}${BOLD}=== $1 ===${NC}"
+    echo -e "${GREEN}${BOLD}>>> $1 <<<${NC}"
+    echo ""
 }
 
 # --- Функция завершения секции ---
 section_end() {
     local end_time=$(date +%s)
     local duration=$((end_time - SECTION_START_TIME))
-    echo -e "${DIM}⏱  Выполнено за ${duration}s${NC}"
+    echo -e "${DIM}>> Выполнено за ${duration}s${NC}"
 }
 
 # --- Функция разделителя ---
 section_separator() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}================================================================${NC}"
+}
+
+# --- Функция определения размера SWAP на основе RAM ---
+calculate_swap_size() {
+    local ram_gb=$(free -g | awk '/^Mem:/{print $2}')
+    
+    if [ -z "$ram_gb" ] || [ "$ram_gb" -eq 0 ]; then
+        # Если не удалось определить, используем значение по умолчанию
+        echo "4G"
+        return
+    fi
+    
+    # Рекомендации по размеру SWAP:
+    # - Для RAM < 2GB: SWAP = 2x RAM (минимум 2GB)
+    # - Для RAM 2-4GB: SWAP = 1x RAM (минимум 4GB)
+    # - Для RAM 4-8GB: SWAP = 0.5x RAM (минимум 4GB, максимум 8GB)
+    # - Для RAM 8-16GB: SWAP = 8GB (фиксированно)
+    # - Для RAM > 16GB: SWAP = 16GB (фиксированно, обычно не нужен больше)
+    
+    if [ "$ram_gb" -lt 2 ]; then
+        local swap_gb=$((ram_gb * 2))
+        [ $swap_gb -lt 2 ] && swap_gb=2
+        echo "${swap_gb}G"
+    elif [ "$ram_gb" -lt 4 ]; then
+        local swap_gb=$ram_gb
+        [ $swap_gb -lt 4 ] && swap_gb=4
+        echo "${swap_gb}G"
+    elif [ "$ram_gb" -lt 8 ]; then
+        local swap_gb=$((ram_gb / 2))
+        [ $swap_gb -lt 4 ] && swap_gb=4
+        [ $swap_gb -gt 8 ] && swap_gb=8
+        echo "${swap_gb}G"
+    elif [ "$ram_gb" -lt 16 ]; then
+        echo "8G"
+    else
+        echo "16G"
+    fi
+}
+
+# --- Функция создания SWAP файла ---
+create_swap_file() {
+    local swap_size=$1
+    
+    # Проверка доступного места на диске
+    local available_space_kb=$(df / | tail -1 | awk '{print $4}')
+    local swap_size_kb=$(echo "$swap_size" | sed 's/G$//')
+    swap_size_kb=$((swap_size_kb * 1024 * 1024))
+    local required_space_kb=$((swap_size_kb + 500000))  # +500MB запас
+    
+    if [ $available_space_kb -lt $required_space_kb ]; then
+        echo -e "${RED}${ERROR} Ошибка: Недостаточно места на диске!${NC}"
+        echo -e "${RED}Требуется: ~$(($required_space_kb / 1024 / 1024))GB, доступно: $(df -h / | tail -1 | awk '{print $4}')${NC}"
+        return 1
+    fi
+    
+    # Создание swap-файла
+    echo -e "${BLUE}${INFO} Создание swap-файла размером $swap_size...${NC}"
+    set +e
+    sudo fallocate -l "$swap_size" /swapfile > /dev/null 2>&1 &
+    local fallocate_pid=$!
+    spinner $fallocate_pid "Создание swap-файла $swap_size"
+    wait $fallocate_pid
+    local fallocate_status=$?
+    set -e
+    
+    if [ $fallocate_status -ne 0 ]; then
+        # Если fallocate не сработал (старые файловые системы), используем dd
+        echo -e "${YELLOW}${INFO} fallocate не поддерживается, используем dd...${NC}"
+        sudo dd if=/dev/zero of=/swapfile bs=1M count=$(echo "$swap_size" | sed 's/G$//') > /dev/null 2>&1 &
+        spinner $! "Создание swap-файла $swap_size (dd)"
+    fi
+    
+    # Установка прав доступа
+    sudo chmod 600 /swapfile
+    echo -e "${GREEN}${SUCCESS} Права доступа установлены${NC}"
+    
+    # Форматирование как swap
+    if sudo mkswap /swapfile > /dev/null 2>&1; then
+        echo -e "${GREEN}${SUCCESS} Swap-файл отформатирован${NC}"
+    else
+        echo -e "${RED}${ERROR} Ошибка форматирования swap-файла!${NC}"
+        sudo rm -f /swapfile
+        return 1
+    fi
+    
+    # Активация swap
+    if sudo swapon /swapfile; then
+        echo -e "${GREEN}${SUCCESS} Swap активирован${NC}"
+    else
+        echo -e "${RED}${ERROR} Ошибка активации swap!${NC}"
+        sudo rm -f /swapfile
+        return 1
+    fi
+    
+    # Добавление в fstab (если еще не добавлен)
+    if ! grep -q '/swapfile' /etc/fstab; then
+        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab > /dev/null
+        echo -e "${GREEN}${SUCCESS} Swap добавлен в fstab${NC}"
+    fi
+    
+    # Настройка swappiness
+    if ! grep -q 'vm.swappiness' /etc/sysctl.conf; then
+        echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf > /dev/null
+    else
+        sudo sed -i 's/^vm.swappiness=.*/vm.swappiness=10/' /etc/sysctl.conf
+    fi
+    sudo sysctl vm.swappiness=10 > /dev/null 2>&1
+    echo -e "${GREEN}${SUCCESS} Swappiness установлен на 10${NC}"
+    
+    return 0
 }
 
 # --- Функция для установки утилиты с подтверждением ---
@@ -117,9 +240,29 @@ install_util() {
     
     if ! command -v $package &> /dev/null; then
         if confirm "Установить $package ($description)?"; then
+            set +e
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq $package > /dev/null 2>&1 &
-            spinner $! "Установка $package"
-            INSTALLED_UTILS=$((INSTALLED_UTILS + 1))
+            local install_pid=$!
+            spinner $install_pid "Установка $package"
+            wait $install_pid
+            local install_status=$?
+            set -e
+            
+            if [ $install_status -eq 0 ]; then
+                # Дополнительная проверка: убедимся, что команда действительно доступна
+                if command -v $package &> /dev/null; then
+                    echo -e "${GREEN}${SUCCESS} $package успешно установлен${NC}"
+                    INSTALLED_UTILS=$((INSTALLED_UTILS + 1))
+                else
+                    echo -e "${YELLOW}${WARNING} $package установлен, но команда недоступна в PATH${NC}"
+                    INSTALLED_UTILS=$((INSTALLED_UTILS + 1))
+                fi
+            else
+                echo -e "${RED}${ERROR} Ошибка установки $package (код выхода: $install_status)${NC}"
+                if ! confirm "Продолжить несмотря на ошибку?"; then
+                    exit 1
+                fi
+            fi
         else
             echo -e "${YELLOW}${SKIP} Установка $package пропущена.${NC}"
         fi
@@ -131,20 +274,28 @@ install_util() {
 # --- Функция интерактивного меню ---
 show_menu() {
     clear
-    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${CYAN}${BOLD}    UBUNTU SERVER OPTIMIZATION SCRIPT v2.0          ${NC}${BLUE}║${NC}"
-    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BLUE}================================================================${NC}"
+    echo -e "${CYAN}${BOLD}"
+    echo "  _   _       _   _   _   ____                        "
+    echo " | | | |_   _| |_| | | | |  _ \ ___  ___  ___  _ __  "
+    echo " | | | | | | | __| | | | | |_) / _ \/ __|/ _ \| '_ \ "
+    echo " | |_| | |_| | |_| |_| | |  _ <  __/\__ \ (_) | | | |"
+    echo "  \___/ \__,_|\__|\___/  |_| \_\___||___/\___/|_| |_|"
     echo ""
-    echo -e "${CYAN}Выберите режим работы:${NC}"
+    echo "              SERVER OPTIMIZATION SCRIPT v2.0"
+    echo -e "${NC}"
+    echo -e "${BLUE}================================================================${NC}"
     echo ""
-    echo -e "  ${BOLD}1)${NC} ${GREEN}Быстрая настройка${NC}"
-    echo -e "     ${DIM}Всё по умолчанию, без подтверждений (~5-10 мин)${NC}"
+    echo -e "${CYAN}${BOLD}Выберите режим работы:${NC}"
     echo ""
-    echo -e "  ${BOLD}2)${NC} ${YELLOW}Интерактивный режим${NC}"
-    echo -e "     ${DIM}С подтверждениями для каждой операции (~10-15 мин)${NC}"
+    echo -e "  ${BOLD}[1]${NC} ${GREEN}Быстрая настройка${NC}"
+    echo -e "      ${DIM}-> Всё по умолчанию, без подтверждений (~5-10 мин)${NC}"
     echo ""
-    echo -e "  ${BOLD}3)${NC} ${BLUE}Минимальная установка${NC}"
-    echo -e "     ${DIM}Только обновления и базовые настройки (~3-5 мин)${NC}"
+    echo -e "  ${BOLD}[2]${NC} ${YELLOW}Интерактивный режим${NC}"
+    echo -e "      ${DIM}-> С подтверждениями для каждой операции (~10-15 мин)${NC}"
+    echo ""
+    echo -e "  ${BOLD}[3]${NC} ${BLUE}Минимальная установка${NC}"
+    echo -e "      ${DIM}-> Только обновления и базовые настройки (~3-5 мин)${NC}"
     echo ""
     read -p "$(echo -e ${MAGENTA}Ваш выбор ${CYAN}[1-3]:${NC} )" MODE
     
@@ -161,15 +312,17 @@ show_menu() {
 # --- Функция сводки ---
 show_summary() {
     echo ""
-    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${CYAN}${BOLD}                  ЧТО БУДЕТ СДЕЛАНО                    ${NC}${BLUE}║${NC}"
-    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BLUE}================================================================${NC}"
+    echo -e "${BLUE}${CYAN}${BOLD}                  ЧТО БУДЕТ СДЕЛАНО${NC}"
+    echo -e "${BLUE}================================================================${NC}"
     echo ""
     
     if [ "$MINIMAL_MODE" = false ]; then
+        # Определяем рекомендуемый размер SWAP для сводки
+        local recommended_swap=$(calculate_swap_size)
         echo -e "  ${SUCCESS} Обновление системы и пакетов"
         echo -e "  ${SUCCESS} Установка/обновление Docker + утилит"
-        echo -e "  ${SPEED} Создание SWAP файла (4GB, swappiness=10)"
+        echo -e "  ${SPEED} Создание SWAP файла (${recommended_swap}, swappiness=10)"
         echo -e "  ${SPEED} Оптимизация сети (BBR, TCP параметры)"
         echo -e "  ${SECURE} Отключение IPv6"
         echo -e "  ${SPEED} Оптимизация дисков и памяти"
@@ -204,13 +357,30 @@ generate_report() {
     
     echo ""
     section_separator
-    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${CYAN}${BOLD}                ОТЧЁТ О ВЫПОЛНЕНИИ                     ${NC}${BLUE}║${NC}"
-    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BLUE}================================================================${NC}"
+    echo -e "${BLUE}${CYAN}${BOLD}                ОТЧЁТ О ВЫПОЛНЕНИИ${NC}"
+    echo -e "${BLUE}================================================================${NC}"
     echo ""
-    echo -e "${GREEN}${BOLD}✅ Выполненные операции:${NC}"
+    echo -e "${GREEN}${BOLD}>>> Выполненные операции:${NC}"
+    echo ""
     echo -e "  ${INFO} Установлено утилит: ${BOLD}$INSTALLED_UTILS${NC}"
-    echo -e "  ${SUCCESS} SWAP: ${BOLD}4GB${NC} (swappiness=10)"
+    
+    # Определяем реальный размер SWAP
+    local swap_size_info="не настроен"
+    if [ -f /swapfile ]; then
+        local swap_size_bytes=$(stat -f%z /swapfile 2>/dev/null || stat -c%s /swapfile 2>/dev/null || echo "0")
+        if [ "$swap_size_bytes" != "0" ] && [ -n "$swap_size_bytes" ]; then
+            local swap_size_gb=$((swap_size_bytes / 1024 / 1024 / 1024))
+            swap_size_info="${swap_size_gb}GB"
+        else
+            # Альтернативный способ через swapon
+            local swap_info=$(swapon --show=SIZE --noheadings /swapfile 2>/dev/null | head -1)
+            if [ -n "$swap_info" ]; then
+                swap_size_info="$swap_info"
+            fi
+        fi
+    fi
+    echo -e "  ${SUCCESS} SWAP: ${BOLD}${swap_size_info}${NC} (swappiness=10)"
     echo -e "  ${SPEED} BBR и TCP оптимизации: ${BOLD}применены${NC}"
     echo -e "  ${SECURE} Отключено сервисов: ${BOLD}$DISABLED_SERVICES${NC}"
     
@@ -221,7 +391,7 @@ generate_report() {
     fi
     
     echo ""
-    echo -e "${CYAN}${BOLD}⏱  Общее время выполнения:${NC} ${total_time}s ${DIM}($(($total_time / 60))m $(($total_time % 60))s)${NC}"
+    echo -e "${CYAN}${BOLD}>> Общее время выполнения:${NC} ${total_time}s ${DIM}($(($total_time / 60))m $(($total_time % 60))s)${NC}"
     echo ""
     echo -e "${BLUE}>>> Текущее использование диска:${NC}"
     df -h / | tail -n 1 | awk '{print "  Использовано: " $3 " из " $2 " (" $5 ")"}'
@@ -237,11 +407,27 @@ clear
 show_menu
 show_summary
 
-# Останавливаем выполнение скрипта при ошибке команд
-set -eo pipefail
-
 # --- 1. Обновление базовой системы ---
 section_start "ОБНОВЛЕНИЕ СИСТЕМЫ"
+
+# Оптимизация APT: параллельные загрузки и другие настройки
+if [ ! -f /etc/apt/apt.conf.d/99-optimizations ]; then
+    cat <<'EOF' | sudo tee /etc/apt/apt.conf.d/99-optimizations > /dev/null
+# Параллельные загрузки (ускоряет обновление)
+Acquire::http::MaxConnections "10";
+Acquire::http::Pipeline-Depth "5";
+
+# Кэширование пакетов
+Acquire::http::No-Cache true;
+Acquire::CompressionTypes::Order:: "gz";
+
+# Таймауты
+Acquire::http::Timeout "10";
+Acquire::ftp::Timeout "10";
+EOF
+    echo -e "${GREEN}${SUCCESS} Настройки APT оптимизированы${NC}"
+fi
+
 sudo apt-get update -qq > /dev/null 2>&1 &
 spinner $! "Обновление списка пакетов"
 
@@ -296,102 +482,49 @@ section_end
 # --- 4. Настройка SWAP ---
 section_start "НАСТРОЙКА SWAP"
 
+# Определяем оптимальный размер SWAP на основе RAM
+SWAP_SIZE=$(calculate_swap_size)
+RAM_SIZE=$(free -g | awk '/^Mem:/{print $2}')
+
+echo -e "${BLUE}${INFO} Обнаружено RAM: ${RAM_SIZE}GB${NC}"
+echo -e "${BLUE}${INFO} Рекомендуемый размер SWAP: ${SWAP_SIZE}${NC}"
+
 if [ -f /swapfile ]; then
     echo -e "${YELLOW}${INFO} Обнаружен существующий swap-файл.${NC}"
-    if confirm "Перезаписать существующий swap-файл?"; then
+    if confirm "Перезаписать существующий swap-файл (новый размер: ${SWAP_SIZE})?"; then
+        # Отключаем существующий swap
         if swapon --show | grep -q '/swapfile'; then
             sudo swapoff -v /swapfile > /dev/null 2>&1
             echo -e "${GREEN}${SUCCESS} Старый swap отключен${NC}"
         fi
         
+        # Удаляем из fstab
         if grep -q '/swapfile' /etc/fstab; then
             sudo sed -i '\|/swapfile|d' /etc/fstab
             echo -e "${GREEN}${SUCCESS} Запись удалена из fstab${NC}"
         fi
         
+        # Удаляем старый файл
         sudo rm -f /swapfile
         echo -e "${GREEN}${SUCCESS} Старый swap-файл удален${NC}"
         
-        AVAILABLE_SPACE=$(df / | tail -1 | awk '{print $4}')
-        REQUIRED_SPACE=$((4 * 1024 * 1024 + 500000))
-        
-        if [ $AVAILABLE_SPACE -lt $REQUIRED_SPACE ]; then
-            echo -e "${RED}${ERROR} Ошибка: Недостаточно места на диске!${NC}"
-            echo -e "${RED}Требуется: ~4.5GB, доступно: $(df -h / | tail -1 | awk '{print $4}')${NC}"
+        # Создаем новый swap-файл
+        if create_swap_file "$SWAP_SIZE"; then
+            echo -e "${GREEN}${SUCCESS} Swap-файл успешно пересоздан${NC}"
+        else
+            echo -e "${RED}${ERROR} Ошибка создания swap-файла!${NC}"
             exit 1
         fi
-        
-        sudo fallocate -l 4G /swapfile > /dev/null 2>&1 &
-        spinner $! "Создание swap-файла 4 ГБ"
-        
-        sudo chmod 600 /swapfile
-        
-        if sudo mkswap /swapfile > /dev/null 2>&1; then
-            echo -e "${GREEN}${SUCCESS} Swap-файл отформатирован${NC}"
-        else
-            echo -e "${RED}${ERROR} Ошибка форматирования swap-файла!${NC}"
-            exit 1
-        fi
-        
-        if sudo swapon /swapfile; then
-            echo -e "${GREEN}${SUCCESS} Swap активирован${NC}"
-        else
-            echo -e "${RED}${ERROR} Ошибка активации swap!${NC}"
-            exit 1
-        fi
-        
-        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab > /dev/null
-        echo -e "${GREEN}${SUCCESS} Swap добавлен в fstab${NC}"
-        
-        if ! grep -q 'vm.swappiness' /etc/sysctl.conf; then
-            echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf > /dev/null
-        else
-            sudo sed -i 's/^vm.swappiness=.*/vm.swappiness=10/' /etc/sysctl.conf
-        fi
-        sudo sysctl vm.swappiness=10 > /dev/null 2>&1
-        echo -e "${GREEN}${SUCCESS} Swappiness установлен на 10${NC}"
     else
         echo -e "${YELLOW}${SKIP} Перезапись swap пропущена.${NC}"
     fi
 else
-    if confirm "Создать swap-файл размером 4 ГБ?"; then
-        AVAILABLE_SPACE=$(df / | tail -1 | awk '{print $4}')
-        REQUIRED_SPACE=$((4 * 1024 * 1024 + 500000))
-        
-        if [ $AVAILABLE_SPACE -lt $REQUIRED_SPACE ]; then
-            echo -e "${RED}${ERROR} Ошибка: Недостаточно места на диске!${NC}"
-            echo -e "${RED}Требуется: ~4.5GB, доступно: $(df -h / | tail -1 | awk '{print $4}')${NC}"
-            exit 1
-        fi
-        
-        sudo fallocate -l 4G /swapfile > /dev/null 2>&1 &
-        spinner $! "Создание swap-файла 4 ГБ"
-        
-        sudo chmod 600 /swapfile
-        
-        if sudo mkswap /swapfile > /dev/null 2>&1; then
-            echo -e "${GREEN}${SUCCESS} Swap-файл отформатирован${NC}"
+    if confirm "Создать swap-файл размером ${SWAP_SIZE}?"; then
+        if create_swap_file "$SWAP_SIZE"; then
+            echo -e "${GREEN}${SUCCESS} Swap-файл успешно создан${NC}"
         else
-            echo -e "${RED}${ERROR} Ошибка форматирования swap-файла!${NC}"
+            echo -e "${RED}${ERROR} Ошибка создания swap-файла!${NC}"
             exit 1
-        fi
-        
-        if sudo swapon /swapfile; then
-            echo -e "${GREEN}${SUCCESS} Swap активирован${NC}"
-        else
-            echo -e "${RED}${ERROR} Ошибка активации swap!${NC}"
-            exit 1
-        fi
-        
-        if ! grep -q '/swapfile' /etc/fstab; then
-            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab > /dev/null
-            echo -e "${GREEN}${SUCCESS} Swap добавлен в fstab${NC}"
-        fi
-        
-        if ! grep -q 'vm.swappiness' /etc/sysctl.conf; then
-            echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf > /dev/null
-            sudo sysctl vm.swappiness=10 > /dev/null 2>&1
-            echo -e "${GREEN}${SUCCESS} Swappiness установлен на 10${NC}"
         fi
     else
         echo -e "${YELLOW}${SKIP} Создание swap пропущено.${NC}"
@@ -493,6 +626,33 @@ section_end
 # --- 7. Оптимизация дисковой подсистемы ---
 section_start "ОПТИМИЗАЦИЯ ДИСКОВ"
 
+# Оптимизация mount options (noatime для уменьшения записи на диск)
+if confirm "Оптимизировать опции монтирования файловой системы (noatime)?"; then
+    local root_fs=$(df / | tail -1 | awk '{print $1}')
+    local fstab_backup="/etc/fstab.bak.$(date +%s)"
+    
+    if [ ! -f /etc/fstab.bak ]; then
+        sudo cp /etc/fstab "$fstab_backup"
+        sudo cp /etc/fstab /etc/fstab.bak
+    fi
+    
+    # Добавляем noatime к опциям монтирования корневой файловой системы
+    if grep -q "^[^#].*[[:space:]]/[[:space:]]" /etc/fstab; then
+        # Убираем существующие noatime, если есть
+        sudo sed -i 's/,noatime//g' /etc/fstab
+        sudo sed -i 's/noatime,//g' /etc/fstab
+        sudo sed -i 's/^\([^[:space:]]*[[:space:]]\+[^[:space:]]\+[[:space:]]\+[^[:space:]]\+[[:space:]]\+\)\([^[:space:]]*\)\([[:space:]]\+[^[:space:]]\+[[:space:]]*\)$/\1\2,noatime\3/' /etc/fstab
+        
+        echo -e "${GREEN}${SUCCESS} Опции монтирования оптимизированы (noatime)${NC}"
+        echo -e "${DIM}  noatime уменьшает количество операций записи на диск${NC}"
+        echo -e "${YELLOW}${WARNING} Изменения применятся после перезагрузки${NC}"
+    else
+        echo -e "${YELLOW}${INFO} Не удалось найти запись для корневой файловой системы в fstab${NC}"
+    fi
+else
+    echo -e "${YELLOW}${SKIP} Оптимизация mount options пропущена.${NC}"
+fi
+
 if confirm "Запустить TRIM для SSD (если установлен)?"; then
     set +e
     TRIM_OUTPUT=$(sudo fstrim -v / 2>&1)
@@ -542,12 +702,150 @@ vm.vfs_cache_pressure = 50
 vm.min_free_kbytes = 65536
 vm.overcommit_memory = 1
 vm.panic_on_oom = 0
+vm.overcommit_ratio = 50
 EOF
     
     sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
     echo -e "${GREEN}${SUCCESS} Параметры памяти оптимизированы${NC}"
 else
     echo -e "${YELLOW}${SKIP} Оптимизация памяти пропущена.${NC}"
+fi
+
+section_end
+
+# --- 8.5. Дополнительные оптимизации ядра ---
+section_start "ДОПОЛНИТЕЛЬНЫЕ ОПТИМИЗАЦИИ ЯДРА"
+
+if confirm "Применить дополнительные оптимизации ядра (I/O scheduler, CPU governor, THP)?"; then
+    # Определяем тип диска (SSD или HDD)
+    local root_disk=$(df / | tail -1 | awk '{print $1}' | sed 's/[0-9]*$//')
+    local is_ssd=false
+    
+    if [ -n "$root_disk" ] && [ -e "$root_disk" ]; then
+        if [ -f "/sys/block/$(basename $root_disk)/queue/rotational" ]; then
+            local rotational=$(cat "/sys/block/$(basename $root_disk)/queue/rotational" 2>/dev/null || echo "1")
+            if [ "$rotational" = "0" ]; then
+                is_ssd=true
+            fi
+        fi
+    fi
+    
+    # Оптимизация I/O scheduler для SSD
+    if [ "$is_ssd" = true ]; then
+        echo -e "${BLUE}${INFO} Обнаружен SSD, настраиваем I/O scheduler...${NC}"
+        local scheduler_set=false
+        
+        # Проверяем доступность дисков
+        for disk in /sys/block/sd* /sys/block/nvme*; do
+            # Проверяем, что это реальный файл/директория (не glob pattern)
+            if [ -e "$disk" ] && [ -e "$disk/queue/scheduler" ]; then
+                disk_name=$(basename "$disk")
+                # Используем mq-deadline или none для NVMe, kyber для SATA SSD
+                set +e
+                if echo "$disk_name" | grep -q "nvme"; then
+                    echo "none" | sudo tee "$disk/queue/scheduler" > /dev/null 2>&1
+                else
+                    echo "mq-deadline" | sudo tee "$disk/queue/scheduler" > /dev/null 2>&1
+                fi
+                local scheduler_status=$?
+                set -e
+                
+                if [ $scheduler_status -eq 0 ]; then
+                    echo -e "${GREEN}${SUCCESS} I/O scheduler для $disk_name настроен${NC}"
+                    scheduler_set=true
+                else
+                    echo -e "${YELLOW}${WARNING} Не удалось установить I/O scheduler для $disk_name${NC}"
+                fi
+            fi
+        done
+        
+        if [ "$scheduler_set" = false ]; then
+            echo -e "${DIM}${INFO} I/O scheduler недоступен или диски не найдены (возможно, виртуальная машина)${NC}"
+        fi
+    else
+        echo -e "${DIM}${INFO} I/O scheduler оптимизация пропущена (не обнаружен SSD)${NC}"
+    fi
+    
+    # Оптимизация CPU governor (performance для серверов)
+    if [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then
+        echo -e "${BLUE}${INFO} Настраиваем CPU governor...${NC}"
+        local governor_set=false
+        
+        for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            if [ -f "$cpu" ]; then
+                set +e
+                echo "performance" | sudo tee "$cpu" > /dev/null 2>&1
+                local governor_status=$?
+                set -e
+                
+                if [ $governor_status -eq 0 ]; then
+                    governor_set=true
+                fi
+            fi
+        done
+        
+        if [ "$governor_set" = true ]; then
+            echo -e "${GREEN}${SUCCESS} CPU governor установлен в performance${NC}"
+        else
+            echo -e "${YELLOW}${WARNING} Не удалось установить CPU governor${NC}"
+        fi
+    else
+        echo -e "${DIM}${INFO} CPU governor недоступен (возможно, виртуальная машина)${NC}"
+    fi
+    
+    # Оптимизация Transparent Huge Pages (THP)
+    echo -e "${BLUE}${INFO} Настраиваем Transparent Huge Pages...${NC}"
+    local thp_set=false
+    
+    if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
+        set +e
+        echo "madvise" | sudo tee /sys/kernel/mm/transparent_hugepage/enabled > /dev/null 2>&1
+        local thp_status=$?
+        set -e
+        
+        if [ $thp_status -eq 0 ]; then
+            thp_set=true
+        fi
+    fi
+    
+    if [ -f /sys/kernel/mm/transparent_hugepage/defrag ]; then
+        set +e
+        echo "madvise" | sudo tee /sys/kernel/mm/transparent_hugepage/defrag > /dev/null 2>&1
+        set -e
+    fi
+    
+    if [ "$thp_set" = true ]; then
+        echo -e "${GREEN}${SUCCESS} THP установлен в madvise${NC}"
+    else
+        echo -e "${DIM}${INFO} THP недоступен или не поддерживается${NC}"
+    fi
+    
+    # Создаем systemd service для применения настроек при загрузке
+    cat <<'EOF' | sudo tee /etc/systemd/system/optimize-kernel.service > /dev/null
+[Unit]
+Description=Apply Kernel Optimizations
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# I/O Scheduler для SSD (с проверками доступности)
+ExecStart=/bin/bash -c 'for disk in /sys/block/sd* /sys/block/nvme*; do if [ -e "$disk" ] && [ -e "$disk/queue/scheduler" ]; then disk_name=$(basename "$disk"); if echo "$disk_name" | grep -q "nvme"; then echo "none" > "$disk/queue/scheduler" 2>/dev/null || true; else echo "mq-deadline" > "$disk/queue/scheduler" 2>/dev/null || true; fi; fi; done'
+# CPU Governor (с проверкой доступности)
+ExecStart=/bin/bash -c 'if [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do [ -f "$cpu" ] && echo "performance" > "$cpu" 2>/dev/null || true; done; fi'
+# Transparent Huge Pages (с проверками)
+ExecStart=/bin/bash -c '[ -f /sys/kernel/mm/transparent_hugepage/enabled ] && echo "madvise" > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true'
+ExecStart=/bin/bash -c '[ -f /sys/kernel/mm/transparent_hugepage/defrag ] && echo "madvise" > /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null || true'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    sudo systemctl daemon-reload > /dev/null 2>&1
+    sudo systemctl enable optimize-kernel.service > /dev/null 2>&1
+    echo -e "${GREEN}${SUCCESS} Сервис оптимизации ядра создан и включен${NC}"
+else
+    echo -e "${YELLOW}${SKIP} Дополнительные оптимизации ядра пропущены.${NC}"
 fi
 
 section_end
@@ -579,6 +877,39 @@ if confirm "Отключить ненужные системные сервис�
     done
 else
     echo -e "${YELLOW}${SKIP} Отключение сервисов пропущено.${NC}"
+fi
+
+section_end
+
+# --- 9.5. Оптимизация systemd journal ---
+section_start "ОПТИМИЗАЦИЯ SYSTEMD JOURNAL"
+
+if confirm "Оптимизировать настройки systemd journal (размер и время хранения)?"; then
+    if [ ! -f /etc/systemd/journald.conf.bak ]; then
+        sudo cp /etc/systemd/journald.conf /etc/systemd/journald.conf.bak
+    fi
+    
+    # Оптимизация journald
+    sudo sed -i 's/^#SystemMaxUse=.*/SystemMaxUse=500M/' /etc/systemd/journald.conf
+    sudo sed -i 's/^#SystemKeepFree=.*/SystemKeepFree=100M/' /etc/systemd/journald.conf
+    sudo sed -i 's/^#SystemMaxFileSize=.*/SystemMaxFileSize=50M/' /etc/systemd/journald.conf
+    sudo sed -i 's/^#MaxRetentionSec=.*/MaxRetentionSec=7day/' /etc/systemd/journald.conf
+    sudo sed -i 's/^#MaxFileSec=.*/MaxFileSec=1day/' /etc/systemd/journald.conf
+    sudo sed -i 's/^#Compress=.*/Compress=yes/' /etc/systemd/journald.conf
+    
+    # Убираем комментарии, если параметры уже были раскомментированы
+    sudo sed -i 's/^SystemMaxUse=.*/SystemMaxUse=500M/' /etc/systemd/journald.conf
+    sudo sed -i 's/^SystemKeepFree=.*/SystemKeepFree=100M/' /etc/systemd/journald.conf
+    sudo sed -i 's/^SystemMaxFileSize=.*/SystemMaxFileSize=50M/' /etc/systemd/journald.conf
+    sudo sed -i 's/^MaxRetentionSec=.*/MaxRetentionSec=7day/' /etc/systemd/journald.conf
+    sudo sed -i 's/^MaxFileSec=.*/MaxFileSec=1day/' /etc/systemd/journald.conf
+    sudo sed -i 's/^Compress=.*/Compress=yes/' /etc/systemd/journald.conf
+    
+    sudo systemctl restart systemd-journald > /dev/null 2>&1
+    echo -e "${GREEN}${SUCCESS} Настройки systemd journal оптимизированы${NC}"
+    echo -e "${DIM}  Максимальный размер: 500MB, хранение: 7 дней${NC}"
+else
+    echo -e "${YELLOW}${SKIP} Оптимизация journal пропущена.${NC}"
 fi
 
 section_end
@@ -647,8 +978,13 @@ EOF
         echo "session required pam_limits.so" | sudo tee -a /etc/pam.d/common-session > /dev/null
     fi
     
+    # Применяем лимиты для текущей сессии (без перезагрузки)
+    ulimit -n 65536 2>/dev/null || true
+    ulimit -u 32768 2>/dev/null || true
+    
     echo -e "${GREEN}${SUCCESS} Лимиты файловых дескрипторов увеличены${NC}"
-    echo -e "${YELLOW}${WARNING} Требуется перезагрузка для применения изменений${NC}"
+    echo -e "${DIM}  Лимиты применены для текущей сессии${NC}"
+    echo -e "${YELLOW}${WARNING} Для постоянного применения требуется перезагрузка${NC}"
 else
     echo -e "${YELLOW}${SKIP} Настройка лимитов пропущена.${NC}"
 fi
@@ -765,7 +1101,7 @@ if confirm "Очистить корзину для всех пользовате
             TRASH_SIZE_HR=$(du -sh "$USER_HOME/.local/share/Trash" 2>/dev/null | awk '{print $1}')
             TOTAL_TRASH_SIZE=$((TOTAL_TRASH_SIZE + TRASH_SIZE))
             sudo rm -rf "$USER_HOME/.local/share/Trash"/{files,info}/* 2>/dev/null
-            echo -e "${GREEN}  ├─ Пользователь $SUDO_USER: $TRASH_SIZE_HR ${SUCCESS}${NC}"
+            echo -e "${GREEN}  |-> Пользователь $SUDO_USER: $TRASH_SIZE_HR ${SUCCESS}${NC}"
         fi
         
         if [ -d "$USER_HOME/Desktop/Trash" ]; then
@@ -779,7 +1115,7 @@ if confirm "Очистить корзину для всех пользовате
         if [ "$TRASH_SIZE" -gt 4096 ]; then
             TOTAL_TRASH_SIZE=$((TOTAL_TRASH_SIZE + TRASH_SIZE))
             sudo rm -rf /root/.local/share/Trash/{files,info}/* 2>/dev/null
-            echo -e "${GREEN}  ├─ Пользователь root: $TRASH_SIZE_HR ${SUCCESS}${NC}"
+            echo -e "${GREEN}  |-> Пользователь root: $TRASH_SIZE_HR ${SUCCESS}${NC}"
         fi
     fi
     
@@ -797,7 +1133,7 @@ if confirm "Очистить корзину для всех пользовате
             if [ "$TRASH_SIZE" -gt 4096 ]; then
                 TOTAL_TRASH_SIZE=$((TOTAL_TRASH_SIZE + TRASH_SIZE))
                 sudo rm -rf "$user_home/.local/share/Trash"/{files,info}/* 2>/dev/null
-                echo -e "${GREEN}  ├─ Пользователь $username: $TRASH_SIZE_HR ${SUCCESS}${NC}"
+                echo -e "${GREEN}  |-> Пользователь $username: $TRASH_SIZE_HR ${SUCCESS}${NC}"
             fi
         fi
     done
@@ -809,9 +1145,9 @@ if confirm "Очистить корзину для всех пользовате
             else if ($1 > 1024) printf "%.2f KB", $1/1024;
             else printf "%d bytes", $1;
         }')
-        echo -e "${GREEN}  └─ Итого освобождено: $TOTAL_TRASH_HR ${SUCCESS}${NC}"
+        echo -e "${GREEN}  `-> Итого освобождено: $TOTAL_TRASH_HR ${SUCCESS}${NC}"
     else
-        echo -e "${YELLOW}  └─ Корзины пустые${NC}"
+        echo -e "${YELLOW}  `-> Корзины пустые${NC}"
     fi
 else
     echo -e "${YELLOW}${SKIP} Очистка корзины пропущена.${NC}"
@@ -822,7 +1158,19 @@ section_end
 # --- Генерация итогового отчёта ---
 generate_report
 
-echo -e "${BLUE}${BOLD}=== ВСЁ ГОТОВО! ===${NC}"
+echo ""
+echo -e "${BLUE}================================================================${NC}"
+echo -e "${GREEN}${BOLD}"
+echo "  _____   _    _   _    _   _   _   _   _   _   _   _ "
+echo " |  __ \ | |  | | | |  | | | | | | | | | | | | | | | |"
+echo " | |  | || |  | | | |  | | | | | | | | | | | | | | | |"
+echo " | |  | || |  | | | |  | | | | | | | | | | | | | | | |"
+echo " | |__| || |__| | | |__| | | |_| | | |_| | | |_| | | |_|"
+echo " |_____/ \____/   \____/   \___/   \___/   \___/   \___/"
+echo ""
+echo "              Оптимизация завершена успешно!"
+echo -e "${NC}"
+echo -e "${BLUE}================================================================${NC}"
 echo ""
 
 # --- 14. Перезагрузка ---
@@ -830,11 +1178,11 @@ if confirm "Перезагрузить систему сейчас?"; then
     echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ===${NC}"
     
     for i in {5..1}; do
-        printf "\r${YELLOW}⏱  Перезагрузка через ${RED}$i${YELLOW} секунд... ${DIM}(Ctrl+C для отмены)${NC}"
+        printf "\r${YELLOW}>> Перезагрузка через ${RED}$i${YELLOW} секунд... ${DIM}(Ctrl+C для отмены)${NC}"
         sleep 1
     done
     
-    printf "\r${GREEN}🔄 Перезагружаем систему...                                ${NC}\n"
+    printf "\r${GREEN}>> Перезагружаем систему...                                ${NC}\n"
     sudo reboot
 else
     echo -e "${YELLOW}${WARNING} Перезагрузка отложена. Рекомендуется перезагрузить систему вручную.${NC}"
