@@ -325,12 +325,19 @@ echo -e "${GREEN}=== ОПТИМИЗАЦИЯ ДИСКОВ ===${NC}"
 
 # TRIM для SSD
 if confirm "Запустить TRIM для SSD (если установлен)?"; then
+    # Временно отключаем pipefail для этой команды
+    set +e
     TRIM_OUTPUT=$(sudo fstrim -v / 2>&1)
     TRIM_STATUS=$?
+    set -e
     
     if [ $TRIM_STATUS -eq 0 ]; then
         TRIMMED=$(echo "$TRIM_OUTPUT" | grep -oP '\d+(\.\d+)?\s+(GB|MB|KB|bytes)' | head -1)
-        echo -e "${GREEN}>>> TRIM выполнен успешно: освобождено $TRIMMED ✓${NC}"
+        if [ ! -z "$TRIMMED" ]; then
+            echo -e "${GREEN}>>> TRIM выполнен успешно: освобождено $TRIMMED ✓${NC}"
+        else
+            echo -e "${GREEN}>>> TRIM выполнен успешно ✓${NC}"
+        fi
     else
         echo -e "${YELLOW}>>> TRIM не поддерживается или диск не SSD${NC}"
     fi
@@ -569,6 +576,78 @@ if [ ! -z "${SUDO_USER:-}" ]; then
 elif [ -d ~/.cache/thumbnails ]; then
     rm -rf ~/.cache/thumbnails/* 2>/dev/null
     echo -e "${GREEN}>>> Кэш миниатюр очищен ✓${NC}"
+fi
+
+# Очистка корзины
+if confirm "Очистить корзину для всех пользователей?"; then
+    echo -e "${BLUE}>>> Очистка корзины:${NC}"
+    TOTAL_TRASH_SIZE=0
+    
+    # Корзина текущего пользователя (если запущено через sudo)
+    if [ ! -z "${SUDO_USER:-}" ]; then
+        USER_HOME=$(eval echo ~$SUDO_USER)
+        
+        if [ -d "$USER_HOME/.local/share/Trash" ]; then
+            TRASH_SIZE=$(du -sb "$USER_HOME/.local/share/Trash" 2>/dev/null | awk '{print $1}')
+            TRASH_SIZE_HR=$(du -sh "$USER_HOME/.local/share/Trash" 2>/dev/null | awk '{print $1}')
+            TOTAL_TRASH_SIZE=$((TOTAL_TRASH_SIZE + TRASH_SIZE))
+            sudo rm -rf "$USER_HOME/.local/share/Trash"/{files,info}/* 2>/dev/null
+            echo -e "${GREEN}  ├─ Пользователь $SUDO_USER: $TRASH_SIZE_HR ✓${NC}"
+        fi
+        
+        # Корзина на рабочем столе (если есть)
+        if [ -d "$USER_HOME/Desktop/Trash" ]; then
+            sudo rm -rf "$USER_HOME/Desktop/Trash"/* 2>/dev/null
+        fi
+    fi
+    
+    # Корзина root
+    if [ -d /root/.local/share/Trash ]; then
+        TRASH_SIZE=$(du -sb /root/.local/share/Trash 2>/dev/null | awk '{print $1}')
+        TRASH_SIZE_HR=$(du -sh /root/.local/share/Trash 2>/dev/null | awk '{print $1}')
+        if [ "$TRASH_SIZE" -gt 4096 ]; then
+            TOTAL_TRASH_SIZE=$((TOTAL_TRASH_SIZE + TRASH_SIZE))
+            sudo rm -rf /root/.local/share/Trash/{files,info}/* 2>/dev/null
+            echo -e "${GREEN}  ├─ Пользователь root: $TRASH_SIZE_HR ✓${NC}"
+        fi
+    fi
+    
+    # Корзины остальных пользователей системы
+    for user_home in /home/*; do
+        if [ -d "$user_home/.local/share/Trash" ]; then
+            username=$(basename "$user_home")
+            
+            # Пропускаем если это уже обработанный SUDO_USER
+            if [ "$username" = "${SUDO_USER:-}" ]; then
+                continue
+            fi
+            
+            TRASH_SIZE=$(du -sb "$user_home/.local/share/Trash" 2>/dev/null | awk '{print $1}')
+            TRASH_SIZE_HR=$(du -sh "$user_home/.local/share/Trash" 2>/dev/null | awk '{print $1}')
+            
+            # Очищаем только если корзина содержит файлы (больше 4KB)
+            if [ "$TRASH_SIZE" -gt 4096 ]; then
+                TOTAL_TRASH_SIZE=$((TOTAL_TRASH_SIZE + TRASH_SIZE))
+                sudo rm -rf "$user_home/.local/share/Trash"/{files,info}/* 2>/dev/null
+                echo -e "${GREEN}  ├─ Пользователь $username: $TRASH_SIZE_HR ✓${NC}"
+            fi
+        fi
+    done
+    
+    # Конвертируем общий размер в человекочитаемый формат
+    if [ $TOTAL_TRASH_SIZE -gt 0 ]; then
+        TOTAL_TRASH_HR=$(echo "$TOTAL_TRASH_SIZE" | awk '{
+            if ($1 > 1073741824) printf "%.2f GB", $1/1073741824;
+            else if ($1 > 1048576) printf "%.2f MB", $1/1048576;
+            else if ($1 > 1024) printf "%.2f KB", $1/1024;
+            else printf "%d bytes", $1;
+        }')
+        echo -e "${GREEN}  └─ Итого освобождено: $TOTAL_TRASH_HR ✓${NC}"
+    else
+        echo -e "${YELLOW}  └─ Корзины пустые${NC}"
+    fi
+else
+    echo -e "${YELLOW}>>> Очистка корзины пропущена.${NC}"
 fi
 
 # Показываем освобожденное место
