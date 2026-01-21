@@ -55,8 +55,8 @@ install_util() {
 
 echo -e "${BLUE}=== ЗАПУСК СКРИПТА ===${NC}"
 
-# Останавливаем выполнение скрипта при ошибке любой из команд
-set -euo pipefail
+# Останавливаем выполнение скрипта при ошибке команд, но разрешаем нормальные выходы функций
+set -eo pipefail
 
 # --- 1. Обновление базовой системы ---
 echo -e "${GREEN}=== ОБНОВЛЕНИЕ СИСТЕМЫ ===${NC}"
@@ -136,6 +136,16 @@ if [ -f /swapfile ]; then
         sudo rm -f /swapfile
         echo -e "${GREEN}>>> Старый swap-файл удален ✓${NC}"
         
+        # Проверяем свободное место (нужно минимум 4GB + 500MB буфер)
+        AVAILABLE_SPACE=$(df / | tail -1 | awk '{print $4}')
+        REQUIRED_SPACE=$((4 * 1024 * 1024 + 500000)) # 4GB + 500MB в KB
+        
+        if [ $AVAILABLE_SPACE -lt $REQUIRED_SPACE ]; then
+            echo -e "${RED}>>> Ошибка: Недостаточно места на диске!${NC}"
+            echo -e "${RED}>>> Требуется: ~4.5GB, доступно: $(df -h / | tail -1 | awk '{print $4}')${NC}"
+            exit 1
+        fi
+        
         # Создаем новый swap-файл
         sudo fallocate -l 4G /swapfile > /dev/null 2>&1 &
         spinner $! "Создание swap-файла 4 ГБ"
@@ -144,12 +154,20 @@ if [ -f /swapfile ]; then
         sudo chmod 600 /swapfile
         
         # Форматируем как swap
-        sudo mkswap /swapfile > /dev/null 2>&1
-        echo -e "${GREEN}>>> Swap-файл отформатирован ✓${NC}"
+        if sudo mkswap /swapfile > /dev/null 2>&1; then
+            echo -e "${GREEN}>>> Swap-файл отформатирован ✓${NC}"
+        else
+            echo -e "${RED}>>> Ошибка форматирования swap-файла!${NC}"
+            exit 1
+        fi
         
         # Включаем swap
-        sudo swapon /swapfile
-        echo -e "${GREEN}>>> Swap активирован ✓${NC}"
+        if sudo swapon /swapfile; then
+            echo -e "${GREEN}>>> Swap активирован ✓${NC}"
+        else
+            echo -e "${RED}>>> Ошибка активации swap!${NC}"
+            exit 1
+        fi
         
         # Добавляем в fstab
         echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab > /dev/null
@@ -169,6 +187,16 @@ if [ -f /swapfile ]; then
 else
     # Swap-файл не существует, создаем новый
     if confirm "Создать swap-файл размером 4 ГБ?"; then
+        # Проверяем свободное место (нужно минимум 4GB + 500MB буфер)
+        AVAILABLE_SPACE=$(df / | tail -1 | awk '{print $4}')
+        REQUIRED_SPACE=$((4 * 1024 * 1024 + 500000)) # 4GB + 500MB в KB
+        
+        if [ $AVAILABLE_SPACE -lt $REQUIRED_SPACE ]; then
+            echo -e "${RED}>>> Ошибка: Недостаточно места на диске!${NC}"
+            echo -e "${RED}>>> Требуется: ~4.5GB, доступно: $(df -h / | tail -1 | awk '{print $4}')${NC}"
+            exit 1
+        fi
+        
         # Создаем swap-файл
         sudo fallocate -l 4G /swapfile > /dev/null 2>&1 &
         spinner $! "Создание swap-файла 4 ГБ"
@@ -177,12 +205,20 @@ else
         sudo chmod 600 /swapfile
         
         # Форматируем как swap
-        sudo mkswap /swapfile > /dev/null 2>&1
-        echo -e "${GREEN}>>> Swap-файл отформатирован ✓${NC}"
+        if sudo mkswap /swapfile > /dev/null 2>&1; then
+            echo -e "${GREEN}>>> Swap-файл отформатирован ✓${NC}"
+        else
+            echo -e "${RED}>>> Ошибка форматирования swap-файла!${NC}"
+            exit 1
+        fi
         
         # Включаем swap
-        sudo swapon /swapfile
-        echo -e "${GREEN}>>> Swap активирован ✓${NC}"
+        if sudo swapon /swapfile; then
+            echo -e "${GREEN}>>> Swap активирован ✓${NC}"
+        else
+            echo -e "${RED}>>> Ошибка активации swap!${NC}"
+            exit 1
+        fi
         
         # Добавляем в fstab
         if ! grep -q '/swapfile' /etc/fstab; then
@@ -297,12 +333,22 @@ spinner $! "Полная очистка кэша пакетов"
 
 # Очистка старых версий ядра (оставляем только текущее и предыдущее)
 if confirm "Удалить старые версии ядра Linux?"; then
-    CURRENT_KERNEL=$(uname -r)
-    OLD_KERNELS=$(dpkg --list | grep -E 'linux-image-[0-9]' | grep -v "$CURRENT_KERNEL" | awk '{print $2}' | sort -V | head -n -1)
+    CURRENT_KERNEL=$(uname -r | sed 's/-generic//')
     
-    if [ ! -z "$OLD_KERNELS" ]; then
-        echo "$OLD_KERNELS" | xargs sudo apt-get purge -yqq > /dev/null 2>&1 &
-        spinner $! "Удаление старых версий ядра"
+    # Получаем список всех установленных ядер, исключаем текущее
+    ALL_KERNELS=$(dpkg --list | grep -E 'linux-image-[0-9]' | grep -v "$CURRENT_KERNEL" | awk '{print $2}' | grep -E '^linux-image-[0-9]' | sort -V)
+    
+    # Считаем количество ядер (текущее + остальные)
+    KERNEL_COUNT=$(echo "$ALL_KERNELS" | grep -c '^linux-image' || echo 0)
+    
+    # Оставляем 1 предыдущее ядро, удаляем все остальные старые
+    if [ $KERNEL_COUNT -gt 1 ]; then
+        OLD_KERNELS=$(echo "$ALL_KERNELS" | head -n -1)
+        
+        if [ ! -z "$OLD_KERNELS" ]; then
+            echo "$OLD_KERNELS" | xargs sudo apt-get purge -yqq > /dev/null 2>&1 &
+            spinner $! "Удаление старых версий ядра"
+        fi
     else
         echo -e "${YELLOW}>>> Старых версий ядра не обнаружено.${NC}"
     fi
@@ -319,7 +365,13 @@ sudo rm -rf /tmp/* /var/tmp/* 2>/dev/null
 echo -e "${GREEN}>>> Временные файлы удалены ✓${NC}"
 
 # Очистка кэша thumbnails (если это десктоп)
-if [ -d ~/.cache/thumbnails ]; then
+if [ ! -z "${SUDO_USER:-}" ]; then
+    USER_HOME=$(eval echo ~$SUDO_USER)
+    if [ -d "$USER_HOME/.cache/thumbnails" ]; then
+        rm -rf "$USER_HOME/.cache/thumbnails"/* 2>/dev/null
+        echo -e "${GREEN}>>> Кэш миниатюр очищен ✓${NC}"
+    fi
+elif [ -d ~/.cache/thumbnails ]; then
     rm -rf ~/.cache/thumbnails/* 2>/dev/null
     echo -e "${GREEN}>>> Кэш миниатюр очищен ✓${NC}"
 fi
@@ -329,15 +381,6 @@ echo -e "${BLUE}>>> Свободное место на диске:${NC}"
 df -h / | tail -n 1 | awk '{print "  Использовано: " $3 " из " $2 " (" $5 ")"}'
 
 echo -e "${BLUE}=== ВСЕ ГОТОВО! ===${NC}"
-
-# --- 7. Перезагрузка ---
-if confirm "Перезагрузить систему сейчас?"; then
-    echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ЧЕРЕЗ 5 СЕКУНД ===${NC}"
-    sleep 5
-    sudo reboot
-else
-    echo -e "${YELLOW}>>> Перезагрузка отложена. Рекомендуется перезагрузить систему вручную.${NC}"
-fi
 
 # --- 7. Перезагрузка ---
 if confirm "Перезагрузить систему сейчас?"; then
