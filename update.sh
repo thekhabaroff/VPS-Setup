@@ -320,6 +320,190 @@ else
     echo -e "${YELLOW}>>> Сервис disable-ipv6 уже существует.${NC}"
 fi
 
+# --- 5.5. Оптимизация дисковой подсистемы ---
+echo -e "${GREEN}=== ОПТИМИЗАЦИЯ ДИСКОВ ===${NC}"
+
+# TRIM для SSD
+if confirm "Запустить TRIM для SSD (если установлен)?"; then
+    if sudo fstrim -v / > /dev/null 2>&1; then
+        echo -e "${GREEN}>>> TRIM выполнен успешно ✓${NC}"
+    else
+        echo -e "${YELLOW}>>> TRIM не поддерживается или диск не SSD${NC}"
+    fi
+else
+    echo -e "${YELLOW}>>> TRIM пропущен.${NC}"
+fi
+
+# Настройка параметров дисковой подсистемы в sysctl
+if confirm "Оптимизировать параметры записи на диск?"; then
+    cat <<'EOF' | sudo tee -a /etc/sysctl.d/99-custom.conf > /dev/null
+
+# --- DISK I/O OPTIMIZATION ---
+vm.dirty_ratio = 10
+vm.dirty_background_ratio = 5
+vm.dirty_expire_centisecs = 3000
+vm.dirty_writeback_centisecs = 500
+EOF
+    
+    sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
+    echo -e "${GREEN}>>> Параметры дисковой подсистемы оптимизированы ✓${NC}"
+else
+    echo -e "${YELLOW}>>> Оптимизация дисков пропущена.${NC}"
+fi
+
+# --- 5.6. Оптимизация памяти ---
+echo -e "${GREEN}=== ОПТИМИЗАЦИЯ ПАМЯТИ ===${NC}"
+
+if confirm "Применить оптимизацию параметров памяти?"; then
+    cat <<'EOF' | sudo tee -a /etc/sysctl.d/99-custom.conf > /dev/null
+
+# --- MEMORY OPTIMIZATION ---
+vm.vfs_cache_pressure = 50
+vm.min_free_kbytes = 65536
+vm.overcommit_memory = 1
+vm.panic_on_oom = 0
+EOF
+    
+    sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
+    echo -e "${GREEN}>>> Параметры памяти оптимизированы ✓${NC}"
+else
+    echo -e "${YELLOW}>>> Оптимизация памяти пропущена.${NC}"
+fi
+
+# --- 5.7. Оптимизация systemd ---
+echo -e "${GREEN}=== ОПТИМИЗАЦИЯ SYSTEMD ===${NC}"
+
+if confirm "Показать анализ времени загрузки systemd?"; then
+    echo -e "${BLUE}>>> Топ-10 самых медленных сервисов:${NC}"
+    systemd-analyze blame | head -n 10
+    echo ""
+fi
+
+if confirm "Отключить ненужные системные сервисы?"; then
+    # Список потенциально ненужных сервисов для серверов
+    SERVICES_TO_DISABLE=(
+        "bluetooth.service"
+        "cups.service"
+        "cups-browsed.service"
+        "ModemManager.service"
+        "avahi-daemon.service"
+    )
+    
+    for service in "${SERVICES_TO_DISABLE[@]}"; do
+        if systemctl is-enabled "$service" &> /dev/null; then
+            sudo systemctl disable --now "$service" > /dev/null 2>&1
+            echo -e "${GREEN}>>> $service отключен ✓${NC}"
+        fi
+    done
+else
+    echo -e "${YELLOW}>>> Отключение сервисов пропущено.${NC}"
+fi
+
+# --- 5.8. Настройка logrotate ---
+echo -e "${GREEN}=== НАСТРОЙКА LOGROTATE ===${NC}"
+
+if confirm "Оптимизировать настройки ротации логов?"; then
+    cat <<'EOF' | sudo tee /etc/logrotate.d/custom-optimization > /dev/null
+# Оптимизация системных логов
+/var/log/syslog
+/var/log/auth.log
+/var/log/kern.log
+{
+    daily
+    rotate 7
+    missingok
+    notifempty
+    compress
+    delaycompress
+    sharedscripts
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate
+    endscript
+}
+
+# Docker логи (если Docker установлен)
+/var/lib/docker/containers/*/*.log {
+    daily
+    rotate 7
+    compress
+    maxsize 10M
+    copytruncate
+    missingok
+    notifempty
+}
+EOF
+    
+    echo -e "${GREEN}>>> Настройки logrotate оптимизированы ✓${NC}"
+else
+    echo -e "${YELLOW}>>> Настройка logrotate пропущена.${NC}"
+fi
+
+# --- 5.9. Увеличение лимитов ресурсов ---
+echo -e "${GREEN}=== НАСТРОЙКА ЛИМИТОВ РЕСУРСОВ ===${NC}"
+
+if confirm "Увеличить лимиты файловых дескрипторов?"; then
+    # Бэкап оригинального файла
+    if [ ! -f /etc/security/limits.conf.bak ]; then
+        sudo cp /etc/security/limits.conf /etc/security/limits.conf.bak
+    fi
+    
+    cat <<'EOF' | sudo tee -a /etc/security/limits.conf > /dev/null
+
+# --- CUSTOM RESOURCE LIMITS ---
+*               soft    nofile          65536
+*               hard    nofile          65536
+root            soft    nofile          65536
+root            hard    nofile          65536
+*               soft    nproc           32768
+*               hard    nproc           32768
+EOF
+    
+    # Также добавляем в pam.d
+    if ! grep -q "pam_limits.so" /etc/pam.d/common-session; then
+        echo "session required pam_limits.so" | sudo tee -a /etc/pam.d/common-session > /dev/null
+    fi
+    
+    echo -e "${GREEN}>>> Лимиты файловых дескрипторов увеличены ✓${NC}"
+    echo -e "${YELLOW}>>> Требуется перезагрузка для применения изменений${NC}"
+else
+    echo -e "${YELLOW}>>> Настройка лимитов пропущена.${NC}"
+fi
+
+# --- 5.10. Дополнительная оптимизация TCP ---
+echo -e "${GREEN}=== ДОПОЛНИТЕЛЬНАЯ ОПТИМИЗАЦИЯ TCP ===${NC}"
+
+if confirm "Применить расширенную оптимизацию TCP?"; then
+    cat <<'EOF' | sudo tee -a /etc/sysctl.d/99-custom.conf > /dev/null
+
+# --- ADVANCED TCP OPTIMIZATION ---
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_max_tw_buckets = 1440000
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_max_syn_backlog = 4096
+net.ipv4.tcp_synack_retries = 2
+net.ipv4.tcp_syn_retries = 2
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_fack = 1
+net.ipv4.tcp_ecn = 0
+net.ipv4.tcp_max_orphans = 262144
+net.ipv4.tcp_orphan_retries = 1
+
+# --- CONNECTION TRACKING ---
+net.netfilter.nf_conntrack_max = 1048576
+net.netfilter.nf_conntrack_tcp_timeout_established = 3600
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
+net.netfilter.nf_conntrack_tcp_timeout_close_wait = 15
+net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
+EOF
+    
+    sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
+    echo -e "${GREEN}>>> Расширенная оптимизация TCP применена ✓${NC}"
+else
+    echo -e "${YELLOW}>>> Дополнительная оптимизация TCP пропущена.${NC}"
+fi
+
 # --- 6. Очистка ---
 echo -e "${GREEN}=== ОЧИСТКА СИСТЕМЫ ===${NC}"
 
