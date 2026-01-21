@@ -117,7 +117,57 @@ install_util "ufw" "упрощённый firewall"
 echo -e "${GREEN}=== НАСТРОЙКА SWAP ===${NC}"
 
 # Проверяем, существует ли уже swap-файл
-if [ ! -f /swapfile ]; then
+if [ -f /swapfile ]; then
+    echo -e "${YELLOW}>>> Обнаружен существующий swap-файл.${NC}"
+    if confirm "Перезаписать существующий swap-файл?"; then
+        # Отключаем текущий swap
+        if swapon --show | grep -q '/swapfile'; then
+            sudo swapoff -v /swapfile > /dev/null 2>&1
+            echo -e "${GREEN}>>> Старый swap отключен ✓${NC}"
+        fi
+        
+        # Удаляем запись из fstab
+        if grep -q '/swapfile' /etc/fstab; then
+            sudo sed -i '\|/swapfile|d' /etc/fstab
+            echo -e "${GREEN}>>> Запись удалена из fstab ✓${NC}"
+        fi
+        
+        # Удаляем старый файл
+        sudo rm -f /swapfile
+        echo -e "${GREEN}>>> Старый swap-файл удален ✓${NC}"
+        
+        # Создаем новый swap-файл
+        sudo fallocate -l 4G /swapfile > /dev/null 2>&1 &
+        spinner $! "Создание swap-файла 4 ГБ"
+        
+        # Настраиваем права
+        sudo chmod 600 /swapfile
+        
+        # Форматируем как swap
+        sudo mkswap /swapfile > /dev/null 2>&1
+        echo -e "${GREEN}>>> Swap-файл отформатирован ✓${NC}"
+        
+        # Включаем swap
+        sudo swapon /swapfile
+        echo -e "${GREEN}>>> Swap активирован ✓${NC}"
+        
+        # Добавляем в fstab
+        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab > /dev/null
+        echo -e "${GREEN}>>> Swap добавлен в fstab ✓${NC}"
+        
+        # Настраиваем swappiness
+        if ! grep -q 'vm.swappiness' /etc/sysctl.conf; then
+            echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf > /dev/null
+        else
+            sudo sed -i 's/^vm.swappiness=.*/vm.swappiness=10/' /etc/sysctl.conf
+        fi
+        sudo sysctl vm.swappiness=10 > /dev/null 2>&1
+        echo -e "${GREEN}>>> Swappiness установлен на 10 ✓${NC}"
+    else
+        echo -e "${YELLOW}>>> Перезапись swap пропущена.${NC}"
+    fi
+else
+    # Swap-файл не существует, создаем новый
     if confirm "Создать swap-файл размером 4 ГБ?"; then
         # Создаем swap-файл
         sudo fallocate -l 4G /swapfile > /dev/null 2>&1 &
@@ -134,7 +184,7 @@ if [ ! -f /swapfile ]; then
         sudo swapon /swapfile
         echo -e "${GREEN}>>> Swap активирован ✓${NC}"
         
-        # Добавляем в fstab, если еще не добавлено
+        # Добавляем в fstab
         if ! grep -q '/swapfile' /etc/fstab; then
             echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab > /dev/null
             echo -e "${GREEN}>>> Swap добавлен в fstab ✓${NC}"
@@ -149,8 +199,6 @@ if [ ! -f /swapfile ]; then
     else
         echo -e "${YELLOW}>>> Создание swap пропущено.${NC}"
     fi
-else
-    echo -e "${YELLOW}>>> Swap-файл уже существует.${NC}"
 fi
 
 # --- 5. Оптимизация сети и ядра (BBR + Sysctl) ---
