@@ -253,7 +253,7 @@ net.ipv4.tcp_congestion_control = bbr
 # --- NETWORK QUEUES ---
 net.core.netdev_max_backlog = 2000
 net.core.somaxconn = 2048
-net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.tcp_max_syn_backlog = 4096
 
 # --- MEMORY BUFFERS ---
 net.core.rmem_default = 212992
@@ -289,9 +289,9 @@ net.core.busy_poll = 50
 EOF
 
 sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
-echo -e "${GREEN}>>> BBR и оптимизации применены ✓${NC}"
+echo -e "${GREEN}>>> BBR и базовые оптимизации применены ✓${NC}"
 
-# --- Отключение IPv6 через systemd ---
+# --- 6. Отключение IPv6 ---
 echo -e "${GREEN}=== ОТКЛЮЧЕНИЕ IPv6 ===${NC}"
 
 if [ ! -f /etc/systemd/system/disable-ipv6.service ]; then
@@ -320,13 +320,17 @@ else
     echo -e "${YELLOW}>>> Сервис disable-ipv6 уже существует.${NC}"
 fi
 
-# --- 5.5. Оптимизация дисковой подсистемы ---
+# --- 7. Оптимизация дисковой подсистемы ---
 echo -e "${GREEN}=== ОПТИМИЗАЦИЯ ДИСКОВ ===${NC}"
 
 # TRIM для SSD
 if confirm "Запустить TRIM для SSD (если установлен)?"; then
-    if sudo fstrim -v / > /dev/null 2>&1; then
-        echo -e "${GREEN}>>> TRIM выполнен успешно ✓${NC}"
+    TRIM_OUTPUT=$(sudo fstrim -v / 2>&1)
+    TRIM_STATUS=$?
+    
+    if [ $TRIM_STATUS -eq 0 ]; then
+        TRIMMED=$(echo "$TRIM_OUTPUT" | grep -oP '\d+(\.\d+)?\s+(GB|MB|KB|bytes)' | head -1)
+        echo -e "${GREEN}>>> TRIM выполнен успешно: освобождено $TRIMMED ✓${NC}"
     else
         echo -e "${YELLOW}>>> TRIM не поддерживается или диск не SSD${NC}"
     fi
@@ -351,7 +355,7 @@ else
     echo -e "${YELLOW}>>> Оптимизация дисков пропущена.${NC}"
 fi
 
-# --- 5.6. Оптимизация памяти ---
+# --- 8. Оптимизация памяти ---
 echo -e "${GREEN}=== ОПТИМИЗАЦИЯ ПАМЯТИ ===${NC}"
 
 if confirm "Применить оптимизацию параметров памяти?"; then
@@ -370,7 +374,7 @@ else
     echo -e "${YELLOW}>>> Оптимизация памяти пропущена.${NC}"
 fi
 
-# --- 5.7. Оптимизация systemd ---
+# --- 9. Оптимизация systemd ---
 echo -e "${GREEN}=== ОПТИМИЗАЦИЯ SYSTEMD ===${NC}"
 
 if confirm "Показать анализ времени загрузки systemd?"; then
@@ -399,7 +403,7 @@ else
     echo -e "${YELLOW}>>> Отключение сервисов пропущено.${NC}"
 fi
 
-# --- 5.8. Настройка logrotate ---
+# --- 10. Настройка logrotate ---
 echo -e "${GREEN}=== НАСТРОЙКА LOGROTATE ===${NC}"
 
 if confirm "Оптимизировать настройки ротации логов?"; then
@@ -438,7 +442,7 @@ else
     echo -e "${YELLOW}>>> Настройка logrotate пропущена.${NC}"
 fi
 
-# --- 5.9. Увеличение лимитов ресурсов ---
+# --- 11. Увеличение лимитов ресурсов ---
 echo -e "${GREEN}=== НАСТРОЙКА ЛИМИТОВ РЕСУРСОВ ===${NC}"
 
 if confirm "Увеличить лимиты файловых дескрипторов?"; then
@@ -469,7 +473,7 @@ else
     echo -e "${YELLOW}>>> Настройка лимитов пропущена.${NC}"
 fi
 
-# --- 5.10. Дополнительная оптимизация TCP ---
+# --- 12. Дополнительная оптимизация TCP ---
 echo -e "${GREEN}=== ДОПОЛНИТЕЛЬНАЯ ОПТИМИЗАЦИЯ TCP ===${NC}"
 
 if confirm "Применить расширенную оптимизацию TCP?"; then
@@ -478,8 +482,6 @@ if confirm "Применить расширенную оптимизацию TCP
 # --- ADVANCED TCP OPTIMIZATION ---
 net.ipv4.tcp_fin_timeout = 15
 net.ipv4.tcp_max_tw_buckets = 1440000
-net.ipv4.tcp_tw_reuse = 1
-net.ipv4.tcp_max_syn_backlog = 4096
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_syn_retries = 2
 net.ipv4.tcp_timestamps = 1
@@ -489,6 +491,15 @@ net.ipv4.tcp_fack = 1
 net.ipv4.tcp_ecn = 0
 net.ipv4.tcp_max_orphans = 262144
 net.ipv4.tcp_orphan_retries = 1
+EOF
+    
+    # Загружаем модуль nf_conntrack перед применением параметров
+    if ! lsmod | grep -q nf_conntrack; then
+        sudo modprobe nf_conntrack > /dev/null 2>&1
+        echo -e "${GREEN}>>> Модуль nf_conntrack загружен ✓${NC}"
+    fi
+    
+    cat <<'EOF' | sudo tee -a /etc/sysctl.d/99-custom.conf > /dev/null
 
 # --- CONNECTION TRACKING ---
 net.netfilter.nf_conntrack_max = 1048576
@@ -504,7 +515,7 @@ else
     echo -e "${YELLOW}>>> Дополнительная оптимизация TCP пропущена.${NC}"
 fi
 
-# --- 6. Очистка ---
+# --- 13. Очистка ---
 echo -e "${GREEN}=== ОЧИСТКА СИСТЕМЫ ===${NC}"
 
 # Удаление неиспользуемых пакетов с зависимостями
@@ -566,7 +577,7 @@ df -h / | tail -n 1 | awk '{print "  Использовано: " $3 " из " $2 
 
 echo -e "${BLUE}=== ВСЕ ГОТОВО! ===${NC}"
 
-# --- 7. Перезагрузка ---
+# --- 14. Перезагрузка ---
 if confirm "Перезагрузить систему сейчас?"; then
     echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ===${NC}"
     
