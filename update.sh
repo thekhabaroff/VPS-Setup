@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 
 # ============================================================================
 #  UBUNTU SERVER OPTIMIZATION SCRIPT v2.0
@@ -27,6 +27,16 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
+# --- Иконки статусов ---
+SUCCESS="✅"
+WARNING="⚠️"
+ERROR="❌"
+INFO="ℹ️"
+SKIP="⏭️"
+CLEAN="🧹"
+SPEED="🔥"
+SECURE="🔒"
+
 # --- Иконки статусов (ASCII-совместимые) ---
 SUCCESS="[OK]"
 WARNING="[!]"
@@ -48,21 +58,20 @@ SECTION_START_TIME=0
 AUTO_MODE=false
 MINIMAL_MODE=false
 
-# --- Функция спиннера (ASCII-совместимый) ---
+# --- Функция спиннера ---
 spinner() {
     local pid=$1
     local message=$2
-    local spin='|/-\'
+    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     local i=0
     local start_time=$(date +%s)
     
     tput civis 2>/dev/null || true
     while kill -0 $pid 2>/dev/null; do
         local elapsed=$(($(date +%s) - start_time))
-        local spin_char="${spin:$((i % 4)):1}"
-        printf "\r${YELLOW}${message} ${spin_char} ${CYAN}[${elapsed}s]${NC}"
-        i=$((i + 1))
-        sleep 0.2
+        i=$(( (i+1) %10 ))
+        printf "\r${YELLOW}${message} ${spin:$i:1} ${CYAN}[${elapsed}s]${NC}"
+        sleep 0.1
     done
     tput cnorm 2>/dev/null || true
     local total_time=$(($(date +%s) - start_time))
@@ -105,7 +114,7 @@ section_start() {
     SECTION_START_TIME=$(date +%s)
     
     echo ""
-    echo -e "${BLUE}================================================================${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     show_progress $CURRENT_SECTION $TOTAL_SECTIONS
     echo -e "${GREEN}${BOLD}>>> $1 <<<${NC}"
     echo ""
@@ -120,7 +129,7 @@ section_end() {
 
 # --- Функция разделителя ---
 section_separator() {
-    echo -e "${BLUE}================================================================${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
 # --- Функция определения размера SWAP на основе RAM ---
@@ -274,28 +283,20 @@ install_util() {
 # --- Функция интерактивного меню ---
 show_menu() {
     clear
-    echo -e "${BLUE}================================================================${NC}"
-    echo -e "${CYAN}${BOLD}"
-    echo "  _   _       _   _   _   ____                        "
-    echo " | | | |_   _| |_| | | | |  _ \ ___  ___  ___  _ __  "
-    echo " | | | | | | | __| | | | | |_) / _ \/ __|/ _ \| '_ \ "
-    echo " | |_| | |_| | |_| |_| | |  _ <  __/\__ \ (_) | | | |"
-    echo "  \___/ \__,_|\__|\___/  |_| \_\___||___/\___/|_| |_|"
+    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║${CYAN}${BOLD}    UBUNTU SERVER OPTIMIZATION SCRIPT v2.0          ${NC}${BLUE}║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo "              SERVER OPTIMIZATION SCRIPT v2.0"
-    echo -e "${NC}"
-    echo -e "${BLUE}================================================================${NC}"
+    echo -e "${CYAN}Выберите режим работы:${NC}"
     echo ""
-    echo -e "${CYAN}${BOLD}Выберите режим работы:${NC}"
+    echo -e "  ${BOLD}1)${NC} ${GREEN}Быстрая настройка${NC}"
+    echo -e "     ${DIM}Всё по умолчанию, без подтверждений (~5-10 мин)${NC}"
     echo ""
-    echo -e "  ${BOLD}[1]${NC} ${GREEN}Быстрая настройка${NC}"
-    echo -e "      ${DIM}-> Всё по умолчанию, без подтверждений (~5-10 мин)${NC}"
+    echo -e "  ${BOLD}2)${NC} ${YELLOW}Интерактивный режим${NC}"
+    echo -e "     ${DIM}С подтверждениями для каждой операции (~10-15 мин)${NC}"
     echo ""
-    echo -e "  ${BOLD}[2]${NC} ${YELLOW}Интерактивный режим${NC}"
-    echo -e "      ${DIM}-> С подтверждениями для каждой операции (~10-15 мин)${NC}"
-    echo ""
-    echo -e "  ${BOLD}[3]${NC} ${BLUE}Минимальная установка${NC}"
-    echo -e "      ${DIM}-> Только обновления и базовые настройки (~3-5 мин)${NC}"
+    echo -e "  ${BOLD}3)${NC} ${BLUE}Минимальная установка${NC}"
+    echo -e "     ${DIM}Только обновления и базовые настройки (~3-5 мин)${NC}"
     echo ""
     read -p "$(echo -e ${MAGENTA}Ваш выбор ${CYAN}[1-3]:${NC} )" MODE
     
@@ -312,9 +313,9 @@ show_menu() {
 # --- Функция сводки ---
 show_summary() {
     echo ""
-    echo -e "${BLUE}================================================================${NC}"
-    echo -e "${BLUE}${CYAN}${BOLD}                  ЧТО БУДЕТ СДЕЛАНО${NC}"
-    echo -e "${BLUE}================================================================${NC}"
+    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║${CYAN}${BOLD}                  ЧТО БУДЕТ СДЕЛАНО                    ${NC}${BLUE}║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
     if [ "$MINIMAL_MODE" = false ]; then
@@ -357,12 +358,11 @@ generate_report() {
     
     echo ""
     section_separator
-    echo -e "${BLUE}================================================================${NC}"
-    echo -e "${BLUE}${CYAN}${BOLD}                ОТЧЁТ О ВЫПОЛНЕНИИ${NC}"
-    echo -e "${BLUE}================================================================${NC}"
+    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║${CYAN}${BOLD}                ОТЧЁТ О ВЫПОЛНЕНИИ                     ${NC}${BLUE}║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${GREEN}${BOLD}>>> Выполненные операции:${NC}"
-    echo ""
+    echo -e "${GREEN}${BOLD}✅ Выполненные операции:${NC}"
     echo -e "  ${INFO} Установлено утилит: ${BOLD}$INSTALLED_UTILS${NC}"
     
     # Определяем реальный размер SWAP
@@ -391,7 +391,7 @@ generate_report() {
     fi
     
     echo ""
-    echo -e "${CYAN}${BOLD}>> Общее время выполнения:${NC} ${total_time}s ${DIM}($(($total_time / 60))m $(($total_time % 60))s)${NC}"
+    echo -e "${CYAN}${BOLD}⏱  Общее время выполнения:${NC} ${total_time}s ${DIM}($(($total_time / 60))m $(($total_time % 60))s)${NC}"
     echo ""
     echo -e "${BLUE}>>> Текущее использование диска:${NC}"
     df -h / | tail -n 1 | awk '{print "  Использовано: " $3 " из " $2 " (" $5 ")"}'
@@ -626,33 +626,6 @@ section_end
 # --- 7. Оптимизация дисковой подсистемы ---
 section_start "ОПТИМИЗАЦИЯ ДИСКОВ"
 
-# Оптимизация mount options (noatime для уменьшения записи на диск)
-if confirm "Оптимизировать опции монтирования файловой системы (noatime)?"; then
-    local root_fs=$(df / | tail -1 | awk '{print $1}')
-    local fstab_backup="/etc/fstab.bak.$(date +%s)"
-    
-    if [ ! -f /etc/fstab.bak ]; then
-        sudo cp /etc/fstab "$fstab_backup"
-        sudo cp /etc/fstab /etc/fstab.bak
-    fi
-    
-    # Добавляем noatime к опциям монтирования корневой файловой системы
-    if grep -q "^[^#].*[[:space:]]/[[:space:]]" /etc/fstab; then
-        # Убираем существующие noatime, если есть
-        sudo sed -i 's/,noatime//g' /etc/fstab
-        sudo sed -i 's/noatime,//g' /etc/fstab
-        sudo sed -i 's/^\([^[:space:]]*[[:space:]]\+[^[:space:]]\+[[:space:]]\+[^[:space:]]\+[[:space:]]\+\)\([^[:space:]]*\)\([[:space:]]\+[^[:space:]]\+[[:space:]]*\)$/\1\2,noatime\3/' /etc/fstab
-        
-        echo -e "${GREEN}${SUCCESS} Опции монтирования оптимизированы (noatime)${NC}"
-        echo -e "${DIM}  noatime уменьшает количество операций записи на диск${NC}"
-        echo -e "${YELLOW}${WARNING} Изменения применятся после перезагрузки${NC}"
-    else
-        echo -e "${YELLOW}${INFO} Не удалось найти запись для корневой файловой системы в fstab${NC}"
-    fi
-else
-    echo -e "${YELLOW}${SKIP} Оптимизация mount options пропущена.${NC}"
-fi
-
 if confirm "Запустить TRIM для SSD (если установлен)?"; then
     set +e
     TRIM_OUTPUT=$(sudo fstrim -v / 2>&1)
@@ -709,143 +682,6 @@ EOF
     echo -e "${GREEN}${SUCCESS} Параметры памяти оптимизированы${NC}"
 else
     echo -e "${YELLOW}${SKIP} Оптимизация памяти пропущена.${NC}"
-fi
-
-section_end
-
-# --- 8.5. Дополнительные оптимизации ядра ---
-section_start "ДОПОЛНИТЕЛЬНЫЕ ОПТИМИЗАЦИИ ЯДРА"
-
-if confirm "Применить дополнительные оптимизации ядра (I/O scheduler, CPU governor, THP)?"; then
-    # Определяем тип диска (SSD или HDD)
-    local root_disk=$(df / | tail -1 | awk '{print $1}' | sed 's/[0-9]*$//')
-    local is_ssd=false
-    
-    if [ -n "$root_disk" ] && [ -e "$root_disk" ]; then
-        if [ -f "/sys/block/$(basename $root_disk)/queue/rotational" ]; then
-            local rotational=$(cat "/sys/block/$(basename $root_disk)/queue/rotational" 2>/dev/null || echo "1")
-            if [ "$rotational" = "0" ]; then
-                is_ssd=true
-            fi
-        fi
-    fi
-    
-    # Оптимизация I/O scheduler для SSD
-    if [ "$is_ssd" = true ]; then
-        echo -e "${BLUE}${INFO} Обнаружен SSD, настраиваем I/O scheduler...${NC}"
-        local scheduler_set=false
-        
-        # Проверяем доступность дисков
-        for disk in /sys/block/sd* /sys/block/nvme*; do
-            # Проверяем, что это реальный файл/директория (не glob pattern)
-            if [ -e "$disk" ] && [ -e "$disk/queue/scheduler" ]; then
-                disk_name=$(basename "$disk")
-                # Используем mq-deadline или none для NVMe, kyber для SATA SSD
-                set +e
-                if echo "$disk_name" | grep -q "nvme"; then
-                    echo "none" | sudo tee "$disk/queue/scheduler" > /dev/null 2>&1
-                else
-                    echo "mq-deadline" | sudo tee "$disk/queue/scheduler" > /dev/null 2>&1
-                fi
-                local scheduler_status=$?
-                set -e
-                
-                if [ $scheduler_status -eq 0 ]; then
-                    echo -e "${GREEN}${SUCCESS} I/O scheduler для $disk_name настроен${NC}"
-                    scheduler_set=true
-                else
-                    echo -e "${YELLOW}${WARNING} Не удалось установить I/O scheduler для $disk_name${NC}"
-                fi
-            fi
-        done
-        
-        if [ "$scheduler_set" = false ]; then
-            echo -e "${DIM}${INFO} I/O scheduler недоступен или диски не найдены (возможно, виртуальная машина)${NC}"
-        fi
-    else
-        echo -e "${DIM}${INFO} I/O scheduler оптимизация пропущена (не обнаружен SSD)${NC}"
-    fi
-    
-    # Оптимизация CPU governor (performance для серверов)
-    if [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then
-        echo -e "${BLUE}${INFO} Настраиваем CPU governor...${NC}"
-        local governor_set=false
-        
-        for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-            if [ -f "$cpu" ]; then
-                set +e
-                echo "performance" | sudo tee "$cpu" > /dev/null 2>&1
-                local governor_status=$?
-                set -e
-                
-                if [ $governor_status -eq 0 ]; then
-                    governor_set=true
-                fi
-            fi
-        done
-        
-        if [ "$governor_set" = true ]; then
-            echo -e "${GREEN}${SUCCESS} CPU governor установлен в performance${NC}"
-        else
-            echo -e "${YELLOW}${WARNING} Не удалось установить CPU governor${NC}"
-        fi
-    else
-        echo -e "${DIM}${INFO} CPU governor недоступен (возможно, виртуальная машина)${NC}"
-    fi
-    
-    # Оптимизация Transparent Huge Pages (THP)
-    echo -e "${BLUE}${INFO} Настраиваем Transparent Huge Pages...${NC}"
-    local thp_set=false
-    
-    if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
-        set +e
-        echo "madvise" | sudo tee /sys/kernel/mm/transparent_hugepage/enabled > /dev/null 2>&1
-        local thp_status=$?
-        set -e
-        
-        if [ $thp_status -eq 0 ]; then
-            thp_set=true
-        fi
-    fi
-    
-    if [ -f /sys/kernel/mm/transparent_hugepage/defrag ]; then
-        set +e
-        echo "madvise" | sudo tee /sys/kernel/mm/transparent_hugepage/defrag > /dev/null 2>&1
-        set -e
-    fi
-    
-    if [ "$thp_set" = true ]; then
-        echo -e "${GREEN}${SUCCESS} THP установлен в madvise${NC}"
-    else
-        echo -e "${DIM}${INFO} THP недоступен или не поддерживается${NC}"
-    fi
-    
-    # Создаем systemd service для применения настроек при загрузке
-    cat <<'EOF' | sudo tee /etc/systemd/system/optimize-kernel.service > /dev/null
-[Unit]
-Description=Apply Kernel Optimizations
-After=multi-user.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-# I/O Scheduler для SSD (с проверками доступности)
-ExecStart=/bin/bash -c 'for disk in /sys/block/sd* /sys/block/nvme*; do if [ -e "$disk" ] && [ -e "$disk/queue/scheduler" ]; then disk_name=$(basename "$disk"); if echo "$disk_name" | grep -q "nvme"; then echo "none" > "$disk/queue/scheduler" 2>/dev/null || true; else echo "mq-deadline" > "$disk/queue/scheduler" 2>/dev/null || true; fi; fi; done'
-# CPU Governor (с проверкой доступности)
-ExecStart=/bin/bash -c 'if [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do [ -f "$cpu" ] && echo "performance" > "$cpu" 2>/dev/null || true; done; fi'
-# Transparent Huge Pages (с проверками)
-ExecStart=/bin/bash -c '[ -f /sys/kernel/mm/transparent_hugepage/enabled ] && echo "madvise" > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true'
-ExecStart=/bin/bash -c '[ -f /sys/kernel/mm/transparent_hugepage/defrag ] && echo "madvise" > /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null || true'
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    sudo systemctl daemon-reload > /dev/null 2>&1
-    sudo systemctl enable optimize-kernel.service > /dev/null 2>&1
-    echo -e "${GREEN}${SUCCESS} Сервис оптимизации ядра создан и включен${NC}"
-else
-    echo -e "${YELLOW}${SKIP} Дополнительные оптимизации ядра пропущены.${NC}"
 fi
 
 section_end
@@ -1158,19 +994,7 @@ section_end
 # --- Генерация итогового отчёта ---
 generate_report
 
-echo ""
-echo -e "${BLUE}================================================================${NC}"
-echo -e "${GREEN}${BOLD}"
-echo "  _____   _    _   _    _   _   _   _   _   _   _   _ "
-echo " |  __ \ | |  | | | |  | | | | | | | | | | | | | | | |"
-echo " | |  | || |  | | | |  | | | | | | | | | | | | | | | |"
-echo " | |  | || |  | | | |  | | | | | | | | | | | | | | | |"
-echo " | |__| || |__| | | |__| | | |_| | | |_| | | |_| | | |_|"
-echo " |_____/ \____/   \____/   \___/   \___/   \___/   \___/"
-echo ""
-echo "              Оптимизация завершена успешно!"
-echo -e "${NC}"
-echo -e "${BLUE}================================================================${NC}"
+echo -e "${BLUE}${BOLD}=== ВСЁ ГОТОВО! ===${NC}"
 echo ""
 
 # --- 14. Перезагрузка ---
@@ -1182,7 +1006,7 @@ if confirm "Перезагрузить систему сейчас?"; then
         sleep 1
     done
     
-    printf "\r${GREEN}>> Перезагружаем систему...                                ${NC}\n"
+    printf "\r${GREEN}🔄 Перезагружаем систему...                                ${NC}\n"
     sudo reboot
 else
     echo -e "${YELLOW}${WARNING} Перезагрузка отложена. Рекомендуется перезагрузить систему вручную.${NC}"
