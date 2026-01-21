@@ -113,7 +113,47 @@ install_util "nmap" "сканер сети и портов"
 install_util "fail2ban" "защита от брутфорса"
 install_util "ufw" "упрощённый firewall"
 
-# --- 4. Оптимизация сети и ядра (BBR + Sysctl) ---
+# --- 4. Настройка SWAP ---
+echo -e "${GREEN}=== НАСТРОЙКА SWAP ===${NC}"
+
+# Проверяем, существует ли уже swap-файл
+if [ ! -f /swapfile ]; then
+    if confirm "Создать swap-файл размером 4 ГБ?"; then
+        # Создаем swap-файл
+        sudo fallocate -l 4G /swapfile > /dev/null 2>&1 &
+        spinner $! "Создание swap-файла 4 ГБ"
+        
+        # Настраиваем права
+        sudo chmod 600 /swapfile
+        
+        # Форматируем как swap
+        sudo mkswap /swapfile > /dev/null 2>&1
+        echo -e "${GREEN}>>> Swap-файл отформатирован ✓${NC}"
+        
+        # Включаем swap
+        sudo swapon /swapfile
+        echo -e "${GREEN}>>> Swap активирован ✓${NC}"
+        
+        # Добавляем в fstab, если еще не добавлено
+        if ! grep -q '/swapfile' /etc/fstab; then
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab > /dev/null
+            echo -e "${GREEN}>>> Swap добавлен в fstab ✓${NC}"
+        fi
+        
+        # Настраиваем swappiness
+        if ! grep -q 'vm.swappiness' /etc/sysctl.conf; then
+            echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf > /dev/null
+            sudo sysctl vm.swappiness=10 > /dev/null 2>&1
+            echo -e "${GREEN}>>> Swappiness установлен на 10 ✓${NC}"
+        fi
+    else
+        echo -e "${YELLOW}>>> Создание swap пропущено.${NC}"
+    fi
+else
+    echo -e "${YELLOW}>>> Swap-файл уже существует.${NC}"
+fi
+
+# --- 5. Оптимизация сети и ядра (BBR + Sysctl) ---
 echo -e "${GREEN}=== ОПТИМИЗАЦИЯ ЯДРА ===${NC}"
 
 # Бэкап конфига
@@ -172,7 +212,7 @@ EOF
 sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
 echo -e "${GREEN}>>> BBR и оптимизации применены ✓${NC}"
 
-# --- 5. Очистка ---
+# --- 6. Очистка ---
 echo -e "${GREEN}=== ОЧИСТКА СИСТЕМЫ ===${NC}"
 sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yqq > /dev/null 2>&1 &
 spinner $! "Удаление неиспользуемых пакетов"
@@ -185,7 +225,7 @@ spinner $! "Очистка старых логов"
 
 echo -e "${BLUE}=== ВСЕ ГОТОВО! ===${NC}"
 
-# --- 6. Перезагрузка ---
+# --- 7. Перезагрузка ---
 if confirm "Перезагрузить систему сейчас?"; then
     echo -e "${GREEN}=== ПЕРЕЗАГРУЗКА СИСТЕМЫ ЧЕРЕЗ 5 СЕКУНД ===${NC}"
     sleep 5
