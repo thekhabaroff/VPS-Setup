@@ -1,11 +1,9 @@
 #!/bin/bash
 
 # ============================================================================
-#  UBUNTU SERVER OPTIMIZATION SCRIPT  v3.1
-#  Комплексная оптимизация Ubuntu Server (BBR / sysctl / очистка / лимиты)
+#  UBUNTU SERVER OPTIMIZATION SCRIPT  v3.2
 # ============================================================================
 
-# Требуются root-права
 if [ "$EUID" -ne 0 ] && ! sudo -n true 2>/dev/null; then
     echo "Ошибка: требуются права root. Запустите: sudo $0"
     exit 1
@@ -13,7 +11,7 @@ fi
 
 set -eo pipefail
 
-# --- Цвета ---
+# --- Цвета (ANSI C quoting) ---
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
 YELLOW=$'\033[1;33m'
@@ -24,7 +22,7 @@ BOLD=$'\033[1m'
 DIM=$'\033[2m'
 NC=$'\033[0m'
 
-# --- Иконки (ASCII) ---
+# --- Иконки ---
 OK="[OK]"
 WARN="[!!]"
 ERR="[XX]"
@@ -36,31 +34,27 @@ LOCK="[##]"
 
 # --- Статистика ---
 INSTALLED_UTILS=0
-DISABLED_SERVICES=0
 FREED_SPACE_BEFORE=0
 SCRIPT_START_TIME=$(date +%s)
 CURRENT_SECTION=0
 SECTION_START_TIME=0
-TOTAL_SECTIONS=10   # 1: update, 2: utils, 3: swap, 4: sysctl, 5: IPv6, 6: disk, 7: mem, 8: systemd/journald/logrotate, 9: limits/TCP, 10: cleanup
+TOTAL_SECTIONS=10
 AUTO_MODE=false
 
-# Проверяем TTY для спиннера
 IS_TTY=false
 [ -t 1 ] && IS_TTY=true
 
-# --- Spinner ---
+# ─── Spinner ─────────────────────────────────────────────────────────────────
 spinner() {
     local pid=$1 msg=$2
     local chars='|/-\' i=0
     local t0; t0=$(date +%s)
-
     if [ "$IS_TTY" = true ]; then
         tput civis 2>/dev/null || true
         while kill -0 "$pid" 2>/dev/null; do
-            local elapsed=$(( $(date +%s) - t0 ))
-            printf "\r${YELLOW}  ${chars:$(( i % 4 )):1} ${msg} ${CYAN}[${elapsed}s]${NC}"
-            i=$(( i + 1 ))
-            sleep 0.15
+            local e=$(( $(date +%s) - t0 ))
+            printf "\r${YELLOW}  ${chars:$(( i % 4 )):1} ${msg} ${CYAN}[${e}s]${NC}"
+            i=$(( i + 1 )); sleep 0.15
         done
         tput cnorm 2>/dev/null || true
         local total=$(( $(date +%s) - t0 ))
@@ -72,7 +66,7 @@ spinner() {
     fi
 }
 
-# --- Подтверждение ---
+# ─── Подтверждение ───────────────────────────────────────────────────────────
 confirm() {
     [ "$AUTO_MODE" = true ] && return 0
     while true; do
@@ -86,7 +80,7 @@ confirm() {
     done
 }
 
-# --- Прогресс-бар ---
+# ─── Прогресс-бар ────────────────────────────────────────────────────────────
 show_progress() {
     local cur=$1 total=$2 w=48
     local pct=$(( cur * 100 / total ))
@@ -98,6 +92,7 @@ show_progress() {
     printf "] ${BOLD}%3d%%${NC} ${DIM}(%d/%d)${NC}\n" "$pct" "$cur" "$total"
 }
 
+# ─── Секции ──────────────────────────────────────────────────────────────────
 section_start() {
     CURRENT_SECTION=$(( CURRENT_SECTION + 1 ))
     SECTION_START_TIME=$(date +%s)
@@ -107,84 +102,66 @@ section_start() {
     echo -e "${CYAN}${BOLD}  ▶  $1${NC}"
     echo ""
 }
-
 section_end() {
     local dur=$(( $(date +%s) - SECTION_START_TIME ))
     echo ""
     echo -e "${DIM}  ✔ Выполнено за ${dur}s${NC}"
 }
-
 section_separator() {
     printf "${BLUE}  ════════════════════════════════════════════════════════${NC}\n"
 }
 
-# --- Расчёт SWAP ---
+# ─── Расчёт SWAP ─────────────────────────────────────────────────────────────
 calculate_swap_size() {
     local ram_gb; ram_gb=$(free -g | awk '/^Mem:/{print $2}')
     [ -z "$ram_gb" ] || [ "$ram_gb" -eq 0 ] && { echo "4G"; return; }
-
-    if   [ "$ram_gb" -lt 2  ]; then
-        local s=$(( ram_gb * 2 )); [ "$s" -lt 2 ] && s=2; echo "${s}G"
-    elif [ "$ram_gb" -lt 4  ]; then
-        echo "4G"
+    if   [ "$ram_gb" -lt 2  ]; then local s=$(( ram_gb * 2 )); [ "$s" -lt 2 ] && s=2; echo "${s}G"
+    elif [ "$ram_gb" -lt 4  ]; then echo "4G"
     elif [ "$ram_gb" -lt 8  ]; then
         local s=$(( ram_gb / 2 ))
         [ "$s" -lt 4 ] && s=4
         [ "$s" -gt 8 ] && s=8
         echo "${s}G"
-    elif [ "$ram_gb" -lt 16 ]; then
-        echo "8G"
-    else
-        echo "16G"
+    elif [ "$ram_gb" -lt 16 ]; then echo "8G"
+    else echo "16G"
     fi
 }
 
-# --- Создание SWAP-файла ---
+# ─── Создание SWAP ───────────────────────────────────────────────────────────
 create_swap_file() {
     local swap_size=$1
     local swap_gb; swap_gb=$(echo "$swap_size" | sed 's/G$//')
-
     local avail_kb; avail_kb=$(df / | awk 'NR==2{print $4}')
     local need_kb=$(( swap_gb * 1024 * 1024 + 524288 ))
     if [ "$avail_kb" -lt "$need_kb" ]; then
         echo -e "${RED}  ${ERR} Недостаточно места! Нужно ~${swap_gb}GB + 512MB, доступно: $(df -h / | awk 'NR==2{print $4}')${NC}"
         return 1
     fi
-
     set +e
     fallocate -l "$swap_size" /swapfile > /dev/null 2>&1 &
-    spinner $! "Создание /swapfile ${swap_size} (fallocate)"
-    wait $!; local frc=$?
+    local fpid=$!
+    spinner $fpid "Создание /swapfile ${swap_size} (fallocate)"
+    wait $fpid; local frc=$?
     set -e
-
     if [ $frc -ne 0 ]; then
         echo -e "${YELLOW}  ${WARN} fallocate не поддерживается — используем dd...${NC}"
         dd if=/dev/zero of=/swapfile bs=1M count=$(( swap_gb * 1024 )) status=none &
         spinner $! "Создание /swapfile ${swap_size} (dd)"
     fi
-
     chmod 600 /swapfile
     echo -e "${GREEN}  ${OK} Права /swapfile: 600${NC}"
-
     if mkswap /swapfile > /dev/null 2>&1; then
         echo -e "${GREEN}  ${OK} /swapfile отформатирован${NC}"
     else
-        echo -e "${RED}  ${ERR} Ошибка mkswap!${NC}"
-        rm -f /swapfile
-        return 1
+        echo -e "${RED}  ${ERR} Ошибка mkswap!${NC}"; rm -f /swapfile; return 1
     fi
-
     if swapon /swapfile; then
         echo -e "${GREEN}  ${OK} Swap активирован${NC}"
     else
-        echo -e "${RED}  ${ERR} Ошибка swapon!${NC}"
-        rm -f /swapfile
-        return 1
+        echo -e "${RED}  ${ERR} Ошибка swapon!${NC}"; rm -f /swapfile; return 1
     fi
-
     grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
     echo -e "${GREEN}  ${OK} /swapfile добавлен в /etc/fstab${NC}"
-
     if grep -q 'vm.swappiness' /etc/sysctl.conf 2>/dev/null; then
         sed -i 's/^vm.swappiness=.*/vm.swappiness=10/' /etc/sysctl.conf
     else
@@ -192,20 +169,14 @@ create_swap_file() {
     fi
     sysctl -q vm.swappiness=10
     echo -e "${GREEN}  ${OK} vm.swappiness=10${NC}"
-
     return 0
 }
 
-# --- install_util: пакет → команда ---
-declare -A PKG_CMD=(
-    [speedtest-cli]="speedtest"
-    [mtr]="mtr"
-)
-
+# ─── install_util ─────────────────────────────────────────────────────────────
+declare -A PKG_CMD=([speedtest-cli]="speedtest" [mtr]="mtr")
 install_util() {
     local pkg=$1 desc=$2
     local cmd="${PKG_CMD[$pkg]:-$pkg}"
-
     if ! command -v "$cmd" &>/dev/null; then
         if confirm "Установить ${BOLD}${pkg}${NC} — ${desc}?"; then
             set +e
@@ -218,7 +189,7 @@ install_util() {
                 INSTALLED_UTILS=$(( INSTALLED_UTILS + 1 ))
             else
                 echo -e "${RED}  ${ERR} Ошибка установки ${pkg} (код: ${rc})${NC}"
-                confirm "Продолжить несмотря на ошибку?" || exit 1
+                if ! confirm "Продолжить несмотря на ошибку?"; then exit 1; fi
             fi
         else
             echo -e "${DIM}  ${SKIP} ${pkg} пропущен${NC}"
@@ -228,7 +199,7 @@ install_util() {
     fi
 }
 
-# --- правка journald.conf ---
+# ─── journald параметр ────────────────────────────────────────────────────────
 set_journal_param() {
     local key=$1 val=$2 file=/etc/systemd/journald.conf
     if grep -qE "^#?${key}=" "$file"; then
@@ -238,12 +209,28 @@ set_journal_param() {
     fi
 }
 
-# --- Меню ---
+# ─── Очистка корзины (вынесена отдельной функцией, явный return 0) ────────────
+#  ИСПРАВЛЕНО: || return и && return заменены на if/fi,
+#  чтобы set -e не прерывал скрипт при возврате ненулевого кода
+_clean_trash() {
+    local path=$1 uname=$2
+    if [ ! -d "$path" ]; then return 0; fi
+    local sz; sz=$(du -sb "$path" 2>/dev/null | awk '{print $1}')
+    if [ "${sz:-0}" -le 4096 ]; then return 0; fi
+    local hr; hr=$(du -sh "$path" 2>/dev/null | awk '{print $1}')
+    _TOTAL_TRASH=$(( _TOTAL_TRASH + sz ))
+    rm -rf "${path}/files" "${path}/info" 2>/dev/null || true
+    mkdir -p "${path}/files" "${path}/info"  2>/dev/null || true
+    echo -e "${GREEN}  ${CLEAN} ${uname}: ${hr}${NC}"
+    return 0
+}
+
+# ─── Меню ─────────────────────────────────────────────────────────────────────
 show_menu() {
     clear
     echo ""
     echo -e "${BLUE}  ╔═══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}  ║${NC}  ${CYAN}${BOLD}  UBUNTU SERVER OPTIMIZATION  v3.1             ${NC}${BLUE}║${NC}"
+    echo -e "${BLUE}  ║${NC}  ${CYAN}${BOLD}  UBUNTU SERVER OPTIMIZATION  v3.2             ${NC}${BLUE}║${NC}"
     echo -e "${BLUE}  ║${NC}  ${DIM}  Комплексная оптимизация Ubuntu Server         ${NC}${BLUE}║${NC}"
     echo -e "${BLUE}  ╚═══════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -262,34 +249,37 @@ show_menu() {
     echo ""
 }
 
-# --- Сводка действий ---
+# ─── Сводка (полностью переработана) ─────────────────────────────────────────
 show_summary() {
     local rec_swap; rec_swap=$(calculate_swap_size)
+
+    echo -e "${BLUE}  ╔═════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}  ║${CYAN}${BOLD}               ЧТО БУДЕТ ВЫПОЛНЕНО                     ${NC}${BLUE}║${NC}"
+    echo -e "${BLUE}  ╠══════╦══════════════════════════════════════════════════════╣${NC}"
+    echo -e "${BLUE}  ║${NC} ${DIM} #  ${NC}${BLUE}║${NC}  ${DIM}Операция${NC}                                           ${BLUE}║${NC}"
+    echo -e "${BLUE}  ╠══════╬══════════════════════════════════════════════════════╣${NC}"
+    printf "${BLUE}  ║${NC}  ${GREEN}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "1"  "Обновление системы и пакетов (apt upgrade)"
+    printf "${BLUE}  ║${NC}  ${GREEN}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "2"  "Утилиты: curl · wget · git · unzip · speedtest · mtr"
+    printf "${BLUE}  ║${NC}  ${YELLOW}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "3"  "SWAP: ${rec_swap}  ·  swappiness=10"
+    printf "${BLUE}  ║${NC}  ${YELLOW}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "4"  "BBR · TCP · ECN · очереди · UDP-буферы · sysctl"
+    printf "${BLUE}  ║${NC}  ${CYAN}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "5"  "Отключение IPv6 (systemd-сервис)"
+    printf "${BLUE}  ║${NC}  ${YELLOW}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "6"  "Диски: TRIM · vm.dirty_*"
+    printf "${BLUE}  ║${NC}  ${YELLOW}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "7"  "Память: vfs_cache_pressure · min_free_kbytes"
+    printf "${BLUE}  ║${NC}  ${YELLOW}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "8"  "Systemd · journald (500MB / 7d) · logrotate"
+    printf "${BLUE}  ║${NC}  ${YELLOW}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "9"  "Лимиты: nofile=65536 · nproc=32768"
+    printf "${BLUE}  ║${NC}  ${GREEN}%2s${NC}  ${BLUE}║${NC}  ${NC}%-53s${BLUE}║${NC}\n" "10" "Очистка: пакеты · кеш · ядра · логи · /tmp · корзины"
+    echo -e "${BLUE}  ╠══════╩══════════════════════════════════════════════════════╣${NC}"
+    echo -e "${BLUE}  ║${NC}  ${YELLOW}${WARN}${NC}  Рекомендуется перезагрузка после завершения         ${BLUE}║${NC}"
+    echo -e "${BLUE}  ╚═════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${BLUE}  ╔═══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}  ║${NC}  ${CYAN}${BOLD}            ЧТО БУДЕТ ВЫПОЛНЕНО              ${NC}${BLUE}║${NC}"
-    echo -e "${BLUE}  ╚═══════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "  ${OK}   Обновление системы и пакетов"
-    echo -e "  ${OK}   Установка базовых утилит (curl, wget, git, unzip, speedtest-cli, mtr)"
-    echo -e "  ${PLUS}   Настройка SWAP: ${BOLD}${rec_swap}${NC}, swappiness=10"
-    echo -e "  ${PLUS}   Ядро: расширенный BBR / TCP / ECN / очереди / буферы"
-    echo -e "  ${LOCK}   Отключение IPv6 (systemd-сервис)"
-    echo -e "  ${PLUS}   Диски: TRIM + vm.dirty_*"
-    echo -e "  ${PLUS}   Память: vfs_cache_pressure, min_free_kbytes"
-    echo -e "  ${PLUS}   Systemd: анализ сервисов, journald (500MB / 7 дней)"
-    echo -e "  ${OK}   Logrotate: системные логи + Docker, 7 дней, сжатие"
-    echo -e "  ${PLUS}   Лимиты: nofile=65536, nproc=32768"
-    echo -e "  ${PLUS}   Расширенный TCP / conntrack"
-    echo -e "  ${CLEAN}   Очистка: пакеты, кеш, старые ядра, логи, /tmp, корзины"
-    echo ""
-    echo -e "  ${YELLOW}${WARN}${NC}  После завершения рекомендуется ${BOLD}sudo reboot${NC}"
-    echo ""
-    confirm "Начать выполнение?" || { echo -e "${RED}  Отменено.${NC}"; exit 0; }
+
+    if ! confirm "Начать выполнение?"; then
+        echo -e "${RED}  Отменено.${NC}"; exit 0
+    fi
     FREED_SPACE_BEFORE=$(df / | awk 'NR==2{print $3}')
 }
 
-# --- Итоговый отчёт ---
+# ─── Итоговый отчёт ───────────────────────────────────────────────────────────
 generate_report() {
     local t=$(( $(date +%s) - SCRIPT_START_TIME ))
     local after; after=$(df / | awk 'NR==2{print $3}')
@@ -308,27 +298,22 @@ generate_report() {
     echo ""
     section_separator
     echo ""
-    echo -e "${BLUE}  ╔═══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}  ║${NC}  ${CYAN}${BOLD}              ОТЧЁТ О ВЫПОЛНЕНИИ            ${NC}${BLUE}║${NC}"
-    echo -e "${BLUE}  ╚═══════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "  ${INFO}  Установлено утилит:     ${BOLD}${INSTALLED_UTILS}${NC}"
-    echo -e "  ${INFO}  SWAP:                   ${BOLD}${swap_info}${NC} (swappiness=10)"
-    echo -e "  ${INFO}  BBR + TCP:              ${BOLD}применены${NC}"
-    echo -e "  ${INFO}  Отключено сервисов:     ${BOLD}${DISABLED_SERVICES}${NC}"
+    echo -e "${BLUE}  ╔═════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}  ║${CYAN}${BOLD}                  ОТЧЁТ О ВЫПОЛНЕНИИ                   ${NC}${BLUE}║${NC}"
+    echo -e "${BLUE}  ╠══════════════════════════════╦══════════════════════════════╣${NC}"
+    printf "${BLUE}  ║${NC}  %-28s${BLUE}║${NC}  ${BOLD}%-28s${NC}${BLUE}║${NC}\n" "Установлено утилит:"    "${INSTALLED_UTILS}"
+    printf "${BLUE}  ║${NC}  %-28s${BLUE}║${NC}  ${BOLD}%-28s${NC}${BLUE}║${NC}\n" "SWAP:"                  "${swap_info} (swappiness=10)"
+    printf "${BLUE}  ║${NC}  %-28s${BLUE}║${NC}  ${BOLD}%-28s${NC}${BLUE}║${NC}\n" "BBR + TCP / sysctl:"    "применены"
     if [ "$freed" -gt 0 ]; then
         local fhr; fhr=$(numfmt --to=iec-i --suffix=B $(( freed * 1024 )) 2>/dev/null || echo "${freed}KB")
-        echo -e "  ${INFO}  Освобождено места:      ${BOLD}${fhr}${NC}"
+        printf "${BLUE}  ║${NC}  %-28s${BLUE}║${NC}  ${BOLD}%-28s${NC}${BLUE}║${NC}\n" "Освобождено места:"   "${fhr}"
     else
-        echo -e "  ${INFO}  Место на диске:         ${BOLD}оптимизировано${NC}"
+        printf "${BLUE}  ║${NC}  %-28s${BLUE}║${NC}  ${BOLD}%-28s${NC}${BLUE}║${NC}\n" "Место на диске:"      "оптимизировано"
     fi
+    echo -e "${BLUE}  ╠══════════════════════════════╩══════════════════════════════╣${NC}"
+    echo -e "${BLUE}  ║${NC}  ${CYAN}${BOLD}⏱  Время:${NC} ${t}s ${DIM}($(( t / 60 ))m $(( t % 60 ))s)${NC}$(df -h / | awk 'NR==2{printf "   %s из %s (%s)", $3, $2, $5}')         ${BLUE}║${NC}"
+    echo -e "${BLUE}  ╚═════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  ${CYAN}${BOLD}⏱  Время выполнения:${NC} ${t}s ${DIM}($(( t / 60 ))m $(( t % 60 ))s)${NC}"
-    echo ""
-    echo -e "${BLUE}  Использование диска:${NC}"
-    df -h / | awk 'NR==2{printf "    %s из %s (%s)\n", $3, $2, $5}'
-    echo ""
-    section_separator
 }
 
 # ============================================================================
@@ -338,7 +323,7 @@ clear
 show_menu
 show_summary
 
-# 1. Обновление системы
+# ── 1. ОБНОВЛЕНИЕ СИСТЕМЫ ─────────────────────────────────────────────────────
 section_start "ОБНОВЛЕНИЕ СИСТЕМЫ"
 
 if [ ! -f /etc/apt/apt.conf.d/99-optimizations ]; then
@@ -354,13 +339,12 @@ fi
 
 apt-get update -qq > /dev/null 2>&1 &
 spinner $! "Обновление списков пакетов"
-
 DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -yqq > /dev/null 2>&1 &
 spinner $! "Полное обновление системы"
 
 section_end
 
-# 2. Базовые утилиты
+# ── 2. БАЗОВЫЕ УТИЛИТЫ ───────────────────────────────────────────────────────
 section_start "УСТАНОВКА УТИЛИТ"
 
 install_util "curl"          "загрузка файлов из интернета"
@@ -372,28 +356,27 @@ install_util "mtr"           "диагностика сети (ping + traceroute
 
 section_end
 
-# 3. SWAP
+# ── 3. SWAP ───────────────────────────────────────────────────────────────────
 section_start "НАСТРОЙКА SWAP"
 
 SWAP_SIZE=$(calculate_swap_size)
-RAM_GB=$(free -g | awk '/^Mem:/{print $2}')
-[ -z "$RAM_GB" ] && RAM_GB=0
-
+RAM_GB=$(free -g | awk '/^Mem:/{print $2}'); [ -z "$RAM_GB" ] && RAM_GB=0
 echo -e "${BLUE}  ${INFO} RAM: ${BOLD}${RAM_GB}GB${NC}  →  рекомендуемый SWAP: ${BOLD}${SWAP_SIZE}${NC}"
 
 if [ -f /swapfile ]; then
     echo -e "${YELLOW}  ${WARN} Обнаружен существующий /swapfile.${NC}"
     if confirm "Пересоздать swap-файл (новый размер: ${SWAP_SIZE})?"; then
-        swapon --show | grep -q '/swapfile' && swapoff /swapfile > /dev/null 2>&1 && \
+        if swapon --show | grep -q '/swapfile'; then
+            swapoff /swapfile > /dev/null 2>&1
             echo -e "${GREEN}  ${OK} Старый swap отключён${NC}"
+        fi
         sed -i '\|/swapfile|d' /etc/fstab 2>/dev/null || true
         rm -f /swapfile
         echo -e "${GREEN}  ${OK} Старый /swapfile удалён${NC}"
         if create_swap_file "$SWAP_SIZE"; then
             echo -e "${GREEN}  ${OK} /swapfile пересоздан (${SWAP_SIZE})${NC}"
         else
-            echo -e "${RED}  ${ERR} Ошибка создания swap!${NC}"
-            exit 1
+            echo -e "${RED}  ${ERR} Ошибка создания swap!${NC}"; exit 1
         fi
     else
         echo -e "${DIM}  ${SKIP} Пересоздание swap пропущено${NC}"
@@ -403,8 +386,7 @@ else
         if create_swap_file "$SWAP_SIZE"; then
             echo -e "${GREEN}  ${OK} /swapfile создан (${SWAP_SIZE})${NC}"
         else
-            echo -e "${RED}  ${ERR} Ошибка создания swap!${NC}"
-            exit 1
+            echo -e "${RED}  ${ERR} Ошибка создания swap!${NC}"; exit 1
         fi
     else
         echo -e "${DIM}  ${SKIP} Создание swap пропущено${NC}"
@@ -413,7 +395,7 @@ fi
 
 section_end
 
-# 4. Расширенный BBR / SYSCTL
+# ── 4. РАСШИРЕННЫЙ BBR / SYSCTL ───────────────────────────────────────────────
 section_start "ОПТИМИЗАЦИЯ ЯДРА: BBR / TCP"
 
 [ ! -f /etc/sysctl.conf.bak ] && cp /etc/sysctl.conf /etc/sysctl.conf.bak
@@ -474,7 +456,6 @@ net.core.message_cost = 16384
 net.netfilter.nf_conntrack_max = 1000000
 
 # --- MTU & DISCOVERY ---
-net.ipv4.tcp_mtu_probing = 1
 net.ipv4.ip_no_pmtu_disc = 0
 
 # --- PORTS & FILES ---
@@ -486,6 +467,10 @@ vm.swappiness = 10
 vm.dirty_ratio = 60
 vm.dirty_background_ratio = 2
 
+# --- DISABLE IPv6 ---
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
 
 sysctl -q -p /etc/sysctl.d/99-custom.conf 2>/dev/null || sysctl --system > /dev/null 2>&1 || true
@@ -499,7 +484,7 @@ fi
 
 section_end
 
-# 5. Отключение IPv6
+# ── 5. ОТКЛЮЧЕНИЕ IPv6 ────────────────────────────────────────────────────────
 section_start "ОТКЛЮЧЕНИЕ IPv6"
 
 if [ ! -f /etc/systemd/system/disable-ipv6.service ]; then
@@ -532,7 +517,7 @@ fi
 
 section_end
 
-# 6. Диски
+# ── 6. ДИСКИ ─────────────────────────────────────────────────────────────────
 section_start "ОПТИМИЗАЦИЯ ДИСКОВ"
 
 if confirm "Запустить TRIM для SSD?"; then
@@ -549,19 +534,32 @@ else
     echo -e "${DIM}  ${SKIP} TRIM пропущен${NC}"
 fi
 
+if confirm "Применить дополнительные параметры vm.dirty_*?"; then
+    cat >> /etc/sysctl.d/99-custom.conf <<'EOF'
+
+# --- DISK I/O (дополнительно) ---
+vm.dirty_expire_centisecs = 3000
+vm.dirty_writeback_centisecs = 500
+EOF
+    sysctl -q -p /etc/sysctl.d/99-custom.conf 2>/dev/null || true
+    echo -e "${GREEN}  ${OK} vm.dirty_expire/writeback применены${NC}"
+else
+    echo -e "${DIM}  ${SKIP} Дополнительные dirty-параметры пропущены${NC}"
+fi
+
 section_end
 
-# 7. Память (дополнительно к vm.* выше)
+# ── 7. ПАМЯТЬ ────────────────────────────────────────────────────────────────
 section_start "ОПТИМИЗАЦИЯ ПАМЯТИ"
 
 if confirm "Применить дополнительные параметры памяти?"; then
     cat >> /etc/sysctl.d/99-custom.conf <<'EOF'
 
+# --- MEMORY ---
 vm.vfs_cache_pressure = 50
 vm.min_free_kbytes = 65536
 vm.overcommit_memory = 0
 vm.panic_on_oom = 0
-
 EOF
     sysctl -q -p /etc/sysctl.d/99-custom.conf 2>/dev/null || true
     echo -e "${GREEN}  ${OK} Параметры памяти применены${NC}"
@@ -571,26 +569,25 @@ fi
 
 section_end
 
-# 8. Systemd / journald / logrotate
+# ── 8. SYSTEMD / JOURNALD / LOGROTATE ────────────────────────────────────────
 section_start "SYSTEMD / JOURNALD / LOGROTATE"
 
 if confirm "Показать топ-10 медленных сервисов при загрузке?"; then
     echo -e "${BLUE}  ${INFO} Анализ времени загрузки systemd:${NC}"
-    systemd-analyze blame 2>/dev/null | head -10 || true
+    systemd-analyze blame 2>/dev/null | head -10 | \
+        awk '{printf "    %-10s  %s\n", $1, $2}' || true
     echo ""
 fi
 
 if confirm "Ограничить journald: 500MB, 7 дней, сжатие?"; then
     JCONF=/etc/systemd/journald.conf
     [ ! -f "${JCONF}.bak" ] && cp "$JCONF" "${JCONF}.bak"
-
     set_journal_param SystemMaxUse       500M
     set_journal_param SystemKeepFree     100M
     set_journal_param SystemMaxFileSize  50M
     set_journal_param MaxRetentionSec    7day
     set_journal_param MaxFileSec         1day
     set_journal_param Compress           yes
-
     systemctl restart systemd-journald > /dev/null 2>&1
     echo -e "${GREEN}  ${OK} journald: 500MB / 7 дней / сжатие${NC}"
 else
@@ -625,19 +622,18 @@ if confirm "Настроить ротацию системных и Docker-ло�
     notifempty
 }
 EOF
-    echo -e "${GREEN}  ${OK} logrotate настроен для системных и Docker-логов${NC}"
+    echo -e "${GREEN}  ${OK} logrotate настроен (системные + Docker)${NC}"
 else
     echo -e "${DIM}  ${SKIP} Настройка logrotate пропущена${NC}"
 fi
 
 section_end
 
-# 9. Лимиты / conntrack уже задан sysctl, здесь только limits.conf
+# ── 9. ЛИМИТЫ ────────────────────────────────────────────────────────────────
 section_start "ЛИМИТЫ РЕСУРСОВ (nofile / nproc)"
 
 if confirm "Увеличить лимиты файловых дескрипторов до 65536?"; then
     [ ! -f /etc/security/limits.conf.bak ] && cp /etc/security/limits.conf /etc/security/limits.conf.bak
-
     if ! grep -q "CUSTOM RESOURCE LIMITS" /etc/security/limits.conf; then
         cat >> /etc/security/limits.conf <<'EOF'
 
@@ -650,22 +646,19 @@ root  hard  nofile  65536
 *     hard  nproc   32768
 EOF
     fi
-
     grep -q "pam_limits.so" /etc/pam.d/common-session 2>/dev/null || \
         echo "session required pam_limits.so" >> /etc/pam.d/common-session
-
     ulimit -n 65536 2>/dev/null || true
     ulimit -u 32768 2>/dev/null || true
-
     echo -e "${GREEN}  ${OK} Лимиты: nofile=65536, nproc=32768${NC}"
-    echo -e "${YELLOW}  ${WARN} Для полного применения требуется перезагрузка${NC}"
+    echo -e "${YELLOW}  ${WARN} Постоянное применение — после перезагрузки${NC}"
 else
     echo -e "${DIM}  ${SKIP} Настройка лимитов пропущена${NC}"
 fi
 
 section_end
 
-# 10. Очистка
+# ── 10. ОЧИСТКА ───────────────────────────────────────────────────────────────
 section_start "ОЧИСТКА СИСТЕМЫ"
 
 DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -yqq > /dev/null 2>&1 &
@@ -704,7 +697,7 @@ systemd-tmpfiles --clean > /dev/null 2>&1 || {
     find /tmp     -mindepth 1 -maxdepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
     find /var/tmp -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} + 2>/dev/null || true
 }
-echo -e "${GREEN}  ${OK} Временные файлы очищены (безопасный метод)${NC}"
+echo -e "${GREEN}  ${OK} Временные файлы очищены${NC}"
 
 TARGET_HOME="${SUDO_USER:+$(eval echo ~"$SUDO_USER")}"
 TARGET_HOME="${TARGET_HOME:-$HOME}"
@@ -714,31 +707,23 @@ if [ -d "${TARGET_HOME}/.cache/thumbnails" ]; then
 fi
 
 if confirm "Очистить корзину для всех пользователей?"; then
-    TOTAL_TRASH=0
-    _clean_trash() {
-        local path=$1 uname=$2
-        [ -d "$path" ] || return
-        local sz; sz=$(du -sb "$path" 2>/dev/null | awk '{print $1}')
-        [ "${sz:-0}" -le 4096 ] && return
-        local hr; hr=$(du -sh "$path" 2>/dev/null | awk '{print $1}')
-        TOTAL_TRASH=$(( TOTAL_TRASH + sz ))
-        rm -rf "${path}/files" "${path}/info" 2>/dev/null || true
-        mkdir -p "${path}/files" "${path}/info" 2>/dev/null || true
-        echo -e "${GREEN}  ${CLEAN} ${uname}: ${hr}${NC}"
-    }
+    _TOTAL_TRASH=0
 
-    [ -n "${SUDO_USER:-}" ] && \
+    # ИСПРАВЛЕНО: _clean_trash определена вне if-блока и возвращает явный 0
+    if [ -n "${SUDO_USER:-}" ]; then
         _clean_trash "$(eval echo ~"$SUDO_USER")/.local/share/Trash" "$SUDO_USER"
+    fi
     _clean_trash "/root/.local/share/Trash" "root"
 
     for uhome in /home/*; do
+        [ -d "$uhome" ] || continue
         un=$(basename "$uhome")
-        [ "$un" = "${SUDO_USER:-}" ] && continue
+        if [ "$un" = "${SUDO_USER:-}" ]; then continue; fi
         _clean_trash "$uhome/.local/share/Trash" "$un"
     done
 
-    if [ "${TOTAL_TRASH:-0}" -gt 0 ]; then
-        HR=$(awk "BEGIN{s=$TOTAL_TRASH;
+    if [ "${_TOTAL_TRASH:-0}" -gt 0 ]; then
+        HR=$(awk "BEGIN{s=$_TOTAL_TRASH;
             if(s>1073741824) printf \"%.2f GB\",s/1073741824;
             else if(s>1048576) printf \"%.2f MB\",s/1048576;
             else if(s>1024)    printf \"%.2f KB\",s/1024;
@@ -753,18 +738,18 @@ fi
 
 section_end
 
-# Итоговый отчёт
+# ── Итоговый отчёт ────────────────────────────────────────────────────────────
 generate_report
 echo -e "${GREEN}${BOLD}  ✔  ВСЁ ГОТОВО!${NC}"
 echo ""
 
-# Перезагрузка (как в твоей исходной версии)
+# ── Перезагрузка с обратным отсчётом ─────────────────────────────────────────
 if confirm "Перезагрузить систему сейчас?"; then
     for i in 5 4 3 2 1; do
         printf "\r${YELLOW}  >> Перезагрузка через ${RED}${BOLD}${i}${NC}${YELLOW} сек...  ${DIM}(Ctrl+C для отмены)${NC}"
         sleep 1
     done
-    printf "\r${GREEN}  >> Перезагружаем систему...                             ${NC}\n"
+    printf "\r${GREEN}  >> Перезагружаем систему...                              ${NC}\n"
     reboot
 else
     echo -e "${YELLOW}  ${WARN} Перезагрузка отложена.${NC}"
