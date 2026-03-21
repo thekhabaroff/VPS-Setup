@@ -55,53 +55,74 @@ select_option() {
     local options=("$@")
     local count=${#options[@]}
     local current=0
-    local key
+
+    # Сохраняем настройки терминала
+    local saved_tty
+    saved_tty=$(stty -g 2>/dev/null)
 
     # Скрываем курсор
-    tput civis 2>/dev/null || true
+    printf '\033[?25l'
 
-    while true; do
-        # Очищаем область меню
-        for ((i = 0; i < count + 2; i++)); do
-            printf "\033[2K"
-            if [ $i -lt $((count + 1)) ]; then
-                printf "\033[1A"
-            fi
+    # Функция отрисовки меню
+    _draw_menu() {
+        # Переходим вверх на count+1 строк и очищаем
+        local i
+        for ((i = 0; i < count + 1; i++)); do
+            printf '\033[A'
         done
-        printf "\r"
+        printf '\r'
 
-        # Рисуем заголовок
+        # Заголовок
+        printf '\033[2K'
         echo -e "${CYAN}${title}${NC}"
-        echo ""
 
-        # Рисуем опции
+        # Опции
         for ((i = 0; i < count; i++)); do
+            printf '\033[2K'
             if [ $i -eq $current ]; then
-                echo -e "  ${WHITE}${BOLD}▸ ${options[$i]}${NC}"
+                echo -e "  ${WHITE}${BOLD}\u25b8 ${options[$i]}${NC}"
             else
                 echo -e "  ${DIM}  ${options[$i]}${NC}"
             fi
         done
+    }
 
-        # Читаем нажатие клавиши
-        local escape
-        IFS= read -rsn1 key 2>/dev/null
-        if [[ "$key" == $'\x1b' ]]; then
-            IFS= read -rsn1 -t 0.1 escape 2>/dev/null
-            if [[ "$escape" == "[" ]]; then
-                IFS= read -rsn1 -t 0.1 escape 2>/dev/null
-                case "$escape" in
-                    'A') ((current > 0)) && ((current--)) ;;
-                    'B') ((current < count - 1)) && ((current++)) ;;
-                esac
-            fi
-        elif [[ "$key" == "" ]]; then
+    # Первая отрисовка (резервируем место)
+    echo -e "${CYAN}${title}${NC}"
+    local i
+    for ((i = 0; i < count; i++)); do
+        if [ $i -eq $current ]; then
+            echo -e "  ${WHITE}${BOLD}\u25b8 ${options[$i]}${NC}"
+        else
+            echo -e "  ${DIM}  ${options[$i]}${NC}"
+        fi
+    done
+
+    while true; do
+        # Читаем один символ через stty raw + dd
+        local char
+        stty raw -echo 2>/dev/null
+        char=$(dd bs=1 count=1 2>/dev/null)
+        stty "$saved_tty" 2>/dev/null
+
+        if [[ "$char" == $'\x1b' ]]; then
+            # Читаем ещё 2 символа escape-последовательности
+            local seq
+            stty raw -echo 2>/dev/null
+            seq=$(dd bs=1 count=2 2>/dev/null)
+            stty "$saved_tty" 2>/dev/null
+
+            case "$seq" in
+                '[A') ((current > 0)) && current=$((current - 1)); _draw_menu ;;
+                '[B') ((current < count - 1)) && current=$((current + 1)); _draw_menu ;;
+            esac
+        elif [[ "$char" == "" || "$char" == $'\n' || "$char" == $'\r' ]]; then
             break
         fi
     done
 
     # Показываем курсор
-    tput cnorm 2>/dev/null || true
+    printf '\033[?25h'
     SELECTED=$current
 }
 
@@ -312,12 +333,6 @@ show_menu() {
     echo -e "${BLUE}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
-    # Резервируем строки для select_option
-    echo ""
-    echo ""
-    echo ""
-    echo ""
-
     select_option "Выберите режим работы:" \
         "Автоматический — всё по умолчанию, без вопросов (~5-10 мин)" \
         "Интерактивный  — подтверждение каждого действия (~10-15 мин)"
@@ -349,12 +364,6 @@ show_summary() {
     echo -e "  ${WHITE}→${NC} Очистка системы"
     echo ""
     echo -e "${YELLOW}  ⚠ Рекомендуется перезагрузка после завершения${NC}"
-    echo ""
-
-    # Резервируем строки для select_option
-    echo ""
-    echo ""
-    echo ""
     echo ""
 
     select_option "Начать выполнение?" "Да, начать" "Отмена"
@@ -900,12 +909,6 @@ echo -e "${GREEN}${BOLD}  === ВСЁ ГОТОВО! ===${NC}"
 echo ""
 
 # --- Перезагрузка ---
-# Резервируем строки для select_option
-echo ""
-echo ""
-echo ""
-echo ""
-
 select_option "Перезагрузить систему?" "Да, перезагрузить" "Нет, позже"
 
 if [ "$SELECTED" -eq 0 ]; then
