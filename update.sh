@@ -37,7 +37,7 @@ INSTALLED_UTILS=0
 DISABLED_SERVICES=0
 FREED_SPACE_BEFORE=0
 SCRIPT_START_TIME=$(date +%s)
-TOTAL_SECTIONS=10
+TOTAL_SECTIONS=11
 CURRENT_SECTION=0
 SECTION_START_TIME=0
 AUTO_MODE=false
@@ -355,6 +355,7 @@ show_summary() {
     echo ""
     echo -e "  ${WHITE}→${NC} Обновление системы и пакетов"
     echo -e "  ${WHITE}→${NC} Установка / обновление Docker"
+    echo -e "  ${WHITE}→${NC} Установка ядра XanMod (BBRv3, low-latency)"
     echo -e "  ${WHITE}→${NC} Установка утилит (curl, wget, git, ping, unzip, mtr)"
     echo -e "  ${WHITE}→${NC} Создание SWAP файла (${recommended_swap}, swappiness=10)"
     echo -e "  ${WHITE}→${NC} Оптимизация ядра и сети (BBR, TCP, буферы, IPv6)"
@@ -500,7 +501,86 @@ install_docker() {
 install_docker
 section_end
 
-# --- 3. Установка утилит ---
+# --- 3. Ядро XanMod ---
+section_start "ЯДРО XANMOD"
+
+install_xanmod() {
+    # Проверяем архитектуру
+    if [ "$(uname -m)" != "x86_64" ]; then
+        echo -e "${DIM}  · XanMod поддерживает только x86_64, пропущено${NC}"
+        return 0
+    fi
+
+    # Проверяем, не установлено ли уже
+    if uname -r | grep -qi xanmod; then
+        echo -e "${DIM}  · XanMod ядро уже установлено ($(uname -r))${NC}"
+        return 0
+    fi
+
+    # Зависимости
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq \
+        curl wget gnupg lsb-release ca-certificates > /dev/null 2>&1 &
+    spinner $! "Зависимости для XanMod"
+
+    # GPG-ключ
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://dl.xanmod.org/archive.key \
+        | gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg 2>/dev/null
+    echo -e "${GREEN}  ✓ GPG-ключ XanMod добавлен${NC}"
+
+    # Репозиторий
+    local CODENAME
+    CODENAME=$(lsb_release -sc 2>/dev/null || echo "noble")
+    cat > /etc/apt/sources.list.d/xanmod-release.sources <<XANMOD_REPO
+Types: deb
+URIs: https://deb.xanmod.org
+Suites: ${CODENAME}
+Components: main
+Signed-By: /etc/apt/keyrings/xanmod-archive-keyring.gpg
+XANMOD_REPO
+    echo -e "${GREEN}  ✓ Репозиторий XanMod добавлен (${CODENAME})${NC}"
+
+    # Определение уровня x86-64
+    local CPU_LEVEL
+    CPU_LEVEL=$(awk -f <(wget -qO - https://dl.xanmod.org/check_x86-64_psabi.sh) 2>/dev/null \
+        | grep -oP 'x86-64-v\K[0-9]' | head -1 || true)
+
+    if [ -z "$CPU_LEVEL" ]; then
+        CPU_LEVEL=3
+        echo -e "${DIM}  · Не удалось определить уровень CPU, используется v${CPU_LEVEL}${NC}"
+    else
+        echo -e "${GREEN}  ✓ CPU поддерживает x86-64-v${CPU_LEVEL}${NC}"
+    fi
+
+    # Обновление списков
+    sudo apt-get update -qq > /dev/null 2>&1 &
+    spinner $! "Обновление списков пакетов"
+
+    # Установка ядра
+    local PACKAGE="linux-xanmod-edge-x64v${CPU_LEVEL}"
+    if apt-cache show "$PACKAGE" > /dev/null 2>&1; then
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq "$PACKAGE" > /dev/null 2>&1 &
+        spinner $! "Установка ${PACKAGE}"
+        echo -e "${GREEN}  ✓ Ядро ${PACKAGE} установлено${NC}"
+    else
+        echo -e "${DIM}  · ${PACKAGE} не найден, пробуем x64v2...${NC}"
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq linux-xanmod-edge-x64v2 > /dev/null 2>&1 &
+        spinner $! "Установка linux-xanmod-edge-x64v2"
+        echo -e "${GREEN}  ✓ Ядро linux-xanmod-edge-x64v2 установлено${NC}"
+    fi
+
+    echo -e "${YELLOW}  ⚠ XanMod + BBRv3 активируется после перезагрузки${NC}"
+}
+
+if confirm_arrow "Установить ядро XanMod (BBRv3, low-latency)?"; then
+    install_xanmod
+else
+    echo -e "${DIM}  · Установка XanMod пропущена${NC}"
+fi
+
+section_end
+
+# --- 4. Установка утилит ---
 section_start "УСТАНОВКА УТИЛИТ"
 
 install_package "curl" "curl"
