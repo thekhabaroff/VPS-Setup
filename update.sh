@@ -603,6 +603,24 @@ install_package "iputils-ping" "ping"
 install_package "unzip" "unzip"
 install_package "mtr" "mtr"
 
+# Speedtest CLI (Ookla)
+if ! command -v speedtest &> /dev/null; then
+    wget -q https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz -O /tmp/speedtest.tgz 2>/dev/null &
+    spinner $! "Скачивание Speedtest CLI"
+    tar -xzf /tmp/speedtest.tgz -C /tmp/ 2>/dev/null
+    sudo mv /tmp/speedtest /usr/local/bin/speedtest 2>/dev/null
+    rm -f /tmp/speedtest.tgz /tmp/speedtest.md 2>/dev/null
+    # Алиас с авто-принятием лицензии
+    PROFILE_HOME=$(eval echo ~"${SUDO_USER:-$USER}")
+    if ! grep -q 'alias speedtest=' "$PROFILE_HOME/.bashrc" 2>/dev/null; then
+        echo "alias speedtest='speedtest --accept-license --accept-gdpr'" >> "$PROFILE_HOME/.bashrc"
+    fi
+    echo -e "${GREEN}  ✓ speedtest установлен${NC}"
+    INSTALLED_UTILS=$((INSTALLED_UTILS + 1))
+else
+    echo -e "${DIM}  · speedtest уже установлен${NC}"
+fi
+
 section_end
 
 # --- 4. Настройка SWAP ---
