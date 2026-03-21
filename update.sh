@@ -205,31 +205,37 @@ section_separator() {
 
 # --- Определение размера SWAP ---
 calculate_swap_size() {
-    local ram_gb
-    ram_gb=$(free -g | awk '/^Mem:/{print $2}')
+    local ram_mb
+    ram_mb=$(free -m | awk '/^Mem:/{print $2}')
 
-    if [ -z "$ram_gb" ] || [ "$ram_gb" -eq 0 ]; then
-        echo "4G"
+    if [ -z "$ram_mb" ] || [ "$ram_mb" -eq 0 ]; then
+        echo "2G"
         return
     fi
 
-    if [ "$ram_gb" -lt 2 ]; then
-        local swap_gb=$((ram_gb * 2))
+    # RAM < 1GB  → SWAP = 2x RAM (мин 1G)
+    # RAM 1-2GB  → SWAP = 2x RAM
+    # RAM 2-4GB  → SWAP = RAM
+    # RAM 4-8GB  → SWAP = RAM/2 (мин 2G)
+    # RAM 8-16GB → SWAP = 4G
+    # RAM > 16GB → SWAP = 4G
+
+    if [ "$ram_mb" -lt 1024 ]; then
+        local swap_mb=$((ram_mb * 2))
+        [ "$swap_mb" -lt 1024 ] && swap_mb=1024
+        echo "${swap_mb}M"
+    elif [ "$ram_mb" -lt 2048 ]; then
+        local swap_gb=$(( (ram_mb * 2 + 1023) / 1024 ))
+        echo "${swap_gb}G"
+    elif [ "$ram_mb" -lt 4096 ]; then
+        local swap_gb=$(( (ram_mb + 1023) / 1024 ))
+        echo "${swap_gb}G"
+    elif [ "$ram_mb" -lt 8192 ]; then
+        local swap_gb=$(( ram_mb / 2048 ))
         [ "$swap_gb" -lt 2 ] && swap_gb=2
         echo "${swap_gb}G"
-    elif [ "$ram_gb" -lt 4 ]; then
-        local swap_gb=$ram_gb
-        [ "$swap_gb" -lt 4 ] && swap_gb=4
-        echo "${swap_gb}G"
-    elif [ "$ram_gb" -lt 8 ]; then
-        local swap_gb=$((ram_gb / 2))
-        [ "$swap_gb" -lt 4 ] && swap_gb=4
-        [ "$swap_gb" -gt 8 ] && swap_gb=8
-        echo "${swap_gb}G"
-    elif [ "$ram_gb" -lt 16 ]; then
-        echo "8G"
     else
-        echo "16G"
+        echo "4G"
     fi
 }
 
@@ -240,8 +246,11 @@ create_swap_file() {
     local available_space_kb
     available_space_kb=$(df / | tail -1 | awk '{print $4}')
     local swap_size_kb
-    swap_size_kb=$(echo "$swap_size" | sed 's/G$//')
-    swap_size_kb=$((swap_size_kb * 1024 * 1024))
+    if echo "$swap_size" | grep -q 'M$'; then
+        swap_size_kb=$(( $(echo "$swap_size" | sed 's/M$//') * 1024 ))
+    else
+        swap_size_kb=$(( $(echo "$swap_size" | sed 's/G$//') * 1024 * 1024 ))
+    fi
     local required_space_kb=$((swap_size_kb + 500000))
 
     if [ "$available_space_kb" -lt "$required_space_kb" ]; then
@@ -260,9 +269,13 @@ create_swap_file() {
 
     if [ $fallocate_status -ne 0 ]; then
         echo -e "${DIM}  fallocate не поддерживается, используем dd...${NC}"
-        local swap_gb
-        swap_gb=$(echo "$swap_size" | sed 's/G$//')
-        sudo dd if=/dev/zero of=/swapfile bs=1M count=$((swap_gb * 1024)) > /dev/null 2>&1 &
+        local dd_count
+        if echo "$swap_size" | grep -q 'M$'; then
+            dd_count=$(echo "$swap_size" | sed 's/M$//')
+        else
+            dd_count=$(( $(echo "$swap_size" | sed 's/G$//') * 1024 ))
+        fi
+        sudo dd if=/dev/zero of=/swapfile bs=1M count="$dd_count" > /dev/null 2>&1 &
         spinner $! "Создание swap-файла $swap_size (dd)"
     fi
 
@@ -596,9 +609,15 @@ section_end
 section_start "НАСТРОЙКА SWAP"
 
 SWAP_SIZE=$(calculate_swap_size)
-RAM_SIZE=$(free -g | awk '/^Mem:/{print $2}')
+RAM_SIZE_MB=$(free -m | awk '/^Mem:/{print $2}')
 
-echo -e "${DIM}  RAM: ${RAM_SIZE}GB | Рекомендуемый SWAP: ${SWAP_SIZE}${NC}"
+if [ "$RAM_SIZE_MB" -ge 1024 ]; then
+    RAM_DISPLAY="$((RAM_SIZE_MB / 1024))GB"
+else
+    RAM_DISPLAY="${RAM_SIZE_MB}MB"
+fi
+
+echo -e "${DIM}  RAM: ${RAM_DISPLAY} | Рекомендуемый SWAP: ${SWAP_SIZE}${NC}"
 
 if [ -f /swapfile ]; then
     echo -e "${DIM}  Обнаружен существующий swap-файл${NC}"
