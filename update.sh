@@ -673,8 +673,23 @@ net.ipv6.conf.default.disable_ipv6=1
 net.ipv6.conf.lo.disable_ipv6=1
 EOF
 
-sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
-echo -e "${GREEN}  ✓ BBR, TCP, буферы, VM, IPv6, латенси — применены${NC}"
+# Применяем параметры по одному, пропуская неподдерживаемые ядром
+SYSCTL_ERRORS=0
+while IFS= read -r line; do
+    # Пропускаем комментарии и пустые строки
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if ! sudo sysctl -w "$line" > /dev/null 2>&1; then
+        SYSCTL_ERRORS=$((SYSCTL_ERRORS + 1))
+        param_name=$(echo "$line" | cut -d'=' -f1)
+        echo -e "${DIM}  · ${param_name} — не поддерживается ядром, пропущен${NC}"
+    fi
+done < /etc/sysctl.d/99-custom.conf
+
+if [ $SYSCTL_ERRORS -eq 0 ]; then
+    echo -e "${GREEN}  ✓ Все параметры применены${NC}"
+else
+    echo -e "${GREEN}  ✓ Параметры применены${NC} ${DIM}($SYSCTL_ERRORS пропущено)${NC}"
+fi
 
 section_end
 
