@@ -921,6 +921,8 @@ generate_report
 
 # --- Статус системы ---
 show_system_status() {
+    # Отключаем set -e для сбора статуса — многие команды могут возвращать ненулевой код
+    set +e
     echo ""
     section_separator
     echo -e "${BLUE}╔═══════════════════════════════════════════════════════════╗${NC}"
@@ -1044,6 +1046,7 @@ except: print('-')
     _L "Apt Updates"  "${APT_UPD} package(s) can be updated"
     _L "Auto Updates" "$AUTO_UPD"
     echo ""
+    set -e
 }
 
 show_system_status
