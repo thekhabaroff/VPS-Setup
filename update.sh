@@ -37,7 +37,7 @@ INSTALLED_UTILS=0
 DISABLED_SERVICES=0
 FREED_SPACE_BEFORE=0
 SCRIPT_START_TIME=$(date +%s)
-TOTAL_SECTIONS=13
+TOTAL_SECTIONS=10
 CURRENT_SECTION=0
 SECTION_START_TIME=0
 AUTO_MODE=false
@@ -272,9 +272,6 @@ create_swap_file() {
         echo -e "${GREEN}  ✓ Swap добавлен в fstab${NC}"
     fi
 
-    if ! grep -q 'vm.swappiness' /etc/sysctl.d/99-custom.conf 2>/dev/null; then
-        echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.d/99-custom.conf > /dev/null
-    fi
     sudo sysctl vm.swappiness=10 > /dev/null 2>&1
     echo -e "${GREEN}  ✓ Swappiness установлен на 10${NC}"
 
@@ -348,13 +345,10 @@ show_summary() {
     echo -e "  ${WHITE}→${NC} Установка / обновление Docker"
     echo -e "  ${WHITE}→${NC} Установка утилит (curl, wget, git, ping, unzip, mtr)"
     echo -e "  ${WHITE}→${NC} Создание SWAP файла (${recommended_swap}, swappiness=10)"
-    echo -e "  ${WHITE}→${NC} Оптимизация ядра (BBR, TCP)"
-    echo -e "  ${WHITE}→${NC} Отключение IPv6"
-    echo -e "  ${WHITE}→${NC} Оптимизация дисков и памяти"
+    echo -e "  ${WHITE}→${NC} Оптимизация ядра и сети (BBR, TCP, буферы, IPv6)"
     echo -e "  ${WHITE}→${NC} Оптимизация systemd и journal"
     echo -e "  ${WHITE}→${NC} Настройка logrotate"
     echo -e "  ${WHITE}→${NC} Увеличение лимитов ресурсов"
-    echo -e "  ${WHITE}→${NC} Расширенная оптимизация TCP"
     echo -e "  ${WHITE}→${NC} Очистка системы"
     echo ""
     echo -e "${YELLOW}  ⚠ Рекомендуется перезагрузка после завершения${NC}"
@@ -553,155 +547,128 @@ fi
 
 section_end
 
-# --- 5. Оптимизация ядра (BBR + Sysctl) ---
-section_start "ОПТИМИЗАЦИЯ ЯДРА"
+# --- 5. Оптимизация ядра и сети ---
+section_start "ОПТИМИЗАЦИЯ ЯДРА И СЕТИ"
 
 if [ ! -f /etc/sysctl.conf.bak ]; then
     sudo cp /etc/sysctl.conf /etc/sysctl.conf.bak
 fi
 
+# Загружаем nf_conntrack до применения sysctl
+if ! lsmod | grep -q nf_conntrack; then
+    sudo modprobe nf_conntrack > /dev/null 2>&1
+    echo -e "${GREEN}  ✓ Модуль nf_conntrack загружен${NC}"
+fi
+
 cat <<'EOF' | sudo tee /etc/sysctl.d/99-custom.conf > /dev/null
-# --- SYSTEM & BBR ---
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
+# --- BBR & CONGESTION CONTROL ---
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_ecn=1
+net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_notsent_lowat=16384
+net.ipv4.tcp_pacing_ss_ratio=100
+net.ipv4.tcp_pacing_ca_ratio=120
+net.ipv4.tcp_min_rtt_wlen=200
+net.ipv4.tcp_min_rtt_active=1
+net.ipv4.tcp_vegas_cong_avoid_limit=20
 
 # --- NETWORK QUEUES ---
-net.core.netdev_max_backlog = 2000
-net.core.somaxconn = 2048
-net.ipv4.tcp_max_syn_backlog = 4096
+net.core.netdev_max_backlog=65536
+net.core.somaxconn=65535
+net.ipv4.tcp_max_syn_backlog=8192
+net.ipv4.tcp_window_scaling=1
+net.core.netdev_budget=600
+net.core.netdev_budget_usecs=8000
+net.core.dev_weight=64
 
 # --- MEMORY BUFFERS ---
-net.core.rmem_default = 212992
-net.core.rmem_max = 6291456
-net.core.wmem_default = 212992
-net.core.wmem_max = 6291456
-net.core.optmem_max = 65536
-net.ipv4.tcp_rmem = 4096 131072 6291456
-net.ipv4.tcp_wmem = 4096 131072 6291456
+net.core.rmem_default=1048576
+net.core.rmem_max=33554432
+net.core.wmem_default=1048576
+net.core.wmem_max=33554432
+net.core.optmem_max=25165824
+net.ipv4.tcp_moderate_rcvbuf=1
+net.ipv4.tcp_rmem=4096 87380 33554432
+net.ipv4.tcp_wmem=4096 65536 33554432
+net.ipv4.udp_rmem_min=65536
+net.ipv4.udp_wmem_min=65536
+net.ipv4.udp_mem=262144 327680 393216
 
-# --- TIMEOUTS & FAST OPEN ---
-net.ipv4.tcp_keepalive_time = 300
-net.ipv4.tcp_keepalive_intvl = 15
-net.ipv4.tcp_keepalive_probes = 3
+# --- VIRTUAL MEMORY ---
+vm.vfs_cache_pressure=50
+vm.min_free_kbytes=65536
+vm.overcommit_memory=0
+vm.swappiness=10
+vm.dirty_ratio=30
+vm.dirty_background_ratio=2
+
+# --- TCP TIMEOUTS & KEEPALIVE ---
+net.ipv4.tcp_keepalive_time=300
+net.ipv4.tcp_keepalive_intvl=15
+net.ipv4.tcp_keepalive_probes=3
+net.ipv4.tcp_fin_timeout=10
+net.ipv4.tcp_orphan_retries=1
+net.ipv4.tcp_max_tw_buckets=1440000
 
 # --- CONNECTION OPTIMIZATIONS ---
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_tw_reuse = 1
-net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_fastopen=3
+net.ipv4.tcp_tw_reuse=1
+net.ipv4.tcp_slow_start_after_idle=0
+net.ipv4.tcp_syn_retries=3
+net.ipv4.tcp_synack_retries=3
+net.ipv4.tcp_autocorking=0
+net.ipv4.tcp_early_retrans=3
 
-# --- MTU & DISCOVERY ---
-net.ipv4.tcp_mtu_probing = 1
-net.ipv4.ip_no_pmtu_disc = 0
+# --- TCP RELIABILITY ---
+net.ipv4.tcp_sack=1
+net.ipv4.tcp_dsack=1
+net.ipv4.tcp_timestamps=1
+net.ipv4.tcp_no_metrics_save=1
+net.ipv4.tcp_limit_output_bytes=131072
+net.ipv4.tcp_challenge_ack_limit=1000
+
+# --- THIN STREAMS (GAMING) ---
+net.ipv4.tcp_thin_linear_timeouts=1
+net.ipv4.tcp_thin_dupack=1
+
+# --- NETWORK STACK ---
+net.ipv4.neigh.default.gc_thresh1=4096
+net.ipv4.neigh.default.gc_thresh2=8192
+net.ipv4.neigh.default.gc_thresh3=16384
+net.core.message_burst=20
+net.core.message_cost=16384
+net.netfilter.nf_conntrack_max=1000000
+
+# --- ROUTING ---
+net.ipv4.ip_no_pmtu_disc=0
+net.ipv4.route.gc_timeout=100
 
 # --- PORTS & FILES ---
-net.ipv4.ip_local_port_range = 1024 65535
-fs.file-max = 100000
+net.ipv4.ip_local_port_range=1024 65535
+fs.file-max=2097152
 
-# --- SOCKET POLLING ---
-net.core.busy_read = 50
-net.core.busy_poll = 50
+# --- CPU SCHEDULER ---
+kernel.sched_min_granularity_ns=1000000
+kernel.sched_wakeup_granularity_ns=1500000
+
+# --- LOW LATENCY ---
+kernel.timer_migration=0
+kernel.nmi_watchdog=0
+net.core.busy_poll=50
+net.core.busy_read=50
+
+# --- IP FORWARDING ---
+net.ipv4.ip_forward=1
+
+# --- DISABLE IPv6 ---
+net.ipv6.conf.all.disable_ipv6=1
+net.ipv6.conf.default.disable_ipv6=1
+net.ipv6.conf.lo.disable_ipv6=1
 EOF
 
 sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
-echo -e "${GREEN}  ✓ BBR и базовые оптимизации применены${NC}"
-
-section_end
-
-# --- 6. Отключение IPv6 ---
-section_start "ОТКЛЮЧЕНИЕ IPv6"
-
-if [ ! -f /etc/systemd/system/disable-ipv6.service ]; then
-    if confirm_arrow "Отключить IPv6?"; then
-        cat << 'EOF' | sudo tee /etc/systemd/system/disable-ipv6.service > /dev/null
-[Unit]
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/sysctl -w net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-        sudo systemctl daemon-reload > /dev/null 2>&1
-        sudo systemctl enable --now disable-ipv6.service > /dev/null 2>&1 &
-        spinner $! "Отключение IPv6"
-        echo -e "${GREEN}  ✓ IPv6 отключен${NC}"
-    else
-        echo -e "${DIM}  · Отключение IPv6 пропущено${NC}"
-    fi
-else
-    echo -e "${DIM}  · Сервис disable-ipv6 уже настроен${NC}"
-fi
-
-section_end
-
-# --- 7. Оптимизация дисков ---
-section_start "ОПТИМИЗАЦИЯ ДИСКОВ"
-
-if confirm_arrow "Запустить TRIM для SSD?"; then
-    set +e
-    TRIM_OUTPUT=$(sudo fstrim -v / 2>&1)
-    TRIM_STATUS=$?
-    set -e
-
-    if [ $TRIM_STATUS -eq 0 ]; then
-        TRIMMED=$(echo "$TRIM_OUTPUT" | grep -oP '\d+(\.\d+)?\s+(GB|MB|KB|bytes)' | head -1)
-        if [ -n "$TRIMMED" ]; then
-            echo -e "${GREEN}  ✓ TRIM выполнен: освобождено $TRIMMED${NC}"
-        else
-            echo -e "${GREEN}  ✓ TRIM выполнен${NC}"
-        fi
-    else
-        echo -e "${DIM}  · TRIM не поддерживается (не SSD)${NC}"
-    fi
-else
-    echo -e "${DIM}  · TRIM пропущен${NC}"
-fi
-
-if confirm_arrow "Оптимизировать параметры записи на диск?"; then
-    if ! grep -q 'DISK I/O OPTIMIZATION' /etc/sysctl.d/99-custom.conf 2>/dev/null; then
-        cat <<'EOF' | sudo tee -a /etc/sysctl.d/99-custom.conf > /dev/null
-
-# --- DISK I/O OPTIMIZATION ---
-vm.dirty_ratio = 10
-vm.dirty_background_ratio = 5
-vm.dirty_expire_centisecs = 3000
-vm.dirty_writeback_centisecs = 500
-EOF
-    fi
-
-    sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
-    echo -e "${GREEN}  ✓ Параметры дисков оптимизированы${NC}"
-else
-    echo -e "${DIM}  · Оптимизация дисков пропущена${NC}"
-fi
-
-section_end
-
-# --- 8. Оптимизация памяти ---
-section_start "ОПТИМИЗАЦИЯ ПАМЯТИ"
-
-if confirm_arrow "Оптимизировать параметры памяти?"; then
-    if ! grep -q 'MEMORY OPTIMIZATION' /etc/sysctl.d/99-custom.conf 2>/dev/null; then
-        cat <<'EOF' | sudo tee -a /etc/sysctl.d/99-custom.conf > /dev/null
-
-# --- MEMORY OPTIMIZATION ---
-vm.vfs_cache_pressure = 50
-vm.min_free_kbytes = 65536
-vm.overcommit_memory = 1
-vm.panic_on_oom = 0
-vm.overcommit_ratio = 50
-EOF
-    fi
-
-    sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
-    echo -e "${GREEN}  ✓ Параметры памяти оптимизированы${NC}"
-else
-    echo -e "${DIM}  · Оптимизация памяти пропущена${NC}"
-fi
+echo -e "${GREEN}  ✓ BBR, TCP, буферы, VM, IPv6, латенси — применены${NC}"
 
 section_end
 
@@ -838,53 +805,7 @@ fi
 
 section_end
 
-# --- 12. Дополнительная оптимизация TCP ---
-section_start "ДОПОЛНИТЕЛЬНАЯ ОПТИМИЗАЦИЯ TCP"
-
-if confirm_arrow "Применить расширенную оптимизацию TCP?"; then
-    if ! grep -q 'ADVANCED TCP OPTIMIZATION' /etc/sysctl.d/99-custom.conf 2>/dev/null; then
-        cat <<'EOF' | sudo tee -a /etc/sysctl.d/99-custom.conf > /dev/null
-
-# --- ADVANCED TCP OPTIMIZATION ---
-net.ipv4.tcp_fin_timeout = 15
-net.ipv4.tcp_max_tw_buckets = 1440000
-net.ipv4.tcp_synack_retries = 2
-net.ipv4.tcp_syn_retries = 2
-net.ipv4.tcp_timestamps = 1
-net.ipv4.tcp_window_scaling = 1
-net.ipv4.tcp_sack = 1
-net.ipv4.tcp_ecn = 0
-net.ipv4.tcp_max_orphans = 262144
-net.ipv4.tcp_orphan_retries = 1
-EOF
-    fi
-
-    if ! lsmod | grep -q nf_conntrack; then
-        sudo modprobe nf_conntrack > /dev/null 2>&1
-        echo -e "${GREEN}  ✓ Модуль nf_conntrack загружен${NC}"
-    fi
-
-    if ! grep -q 'CONNECTION TRACKING' /etc/sysctl.d/99-custom.conf 2>/dev/null; then
-        cat <<'EOF' | sudo tee -a /etc/sysctl.d/99-custom.conf > /dev/null
-
-# --- CONNECTION TRACKING ---
-net.netfilter.nf_conntrack_max = 1048576
-net.netfilter.nf_conntrack_tcp_timeout_established = 3600
-net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
-net.netfilter.nf_conntrack_tcp_timeout_close_wait = 15
-net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
-EOF
-    fi
-
-    sudo sysctl -p /etc/sysctl.d/99-custom.conf > /dev/null 2>&1
-    echo -e "${GREEN}  ✓ Расширенная оптимизация TCP применена${NC}"
-else
-    echo -e "${DIM}  · Оптимизация TCP пропущена${NC}"
-fi
-
-section_end
-
-# --- 13. Очистка ---
+# --- 9. Очистка ---
 section_start "ОЧИСТКА СИСТЕМЫ"
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -yqq > /dev/null 2>&1 &
