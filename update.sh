@@ -84,23 +84,20 @@ select_option() {
         done
 
         # Читаем нажатие клавиши
-        IFS= read -rsn1 key
-        case "$key" in
-            $'\x1b')
-                read -rsn2 key
-                case "$key" in
-                    '[A') # Стрелка вверх
-                        ((current > 0)) && ((current--))
-                        ;;
-                    '[B') # Стрелка вниз
-                        ((current < count - 1)) && ((current++))
-                        ;;
+        local escape
+        IFS= read -rsn1 key 2>/dev/null
+        if [[ "$key" == $'\x1b' ]]; then
+            IFS= read -rsn1 -t 0.1 escape 2>/dev/null
+            if [[ "$escape" == "[" ]]; then
+                IFS= read -rsn1 -t 0.1 escape 2>/dev/null
+                case "$escape" in
+                    'A') ((current > 0)) && ((current--)) ;;
+                    'B') ((current < count - 1)) && ((current++)) ;;
                 esac
-                ;;
-            '') # Enter
-                break
-                ;;
-        esac
+            fi
+        elif [[ "$key" == "" ]]; then
+            break
+        fi
     done
 
     # Показываем курсор
