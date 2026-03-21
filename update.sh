@@ -623,7 +623,15 @@ if [ -f /swapfile ]; then
     echo -e "${DIM}  Обнаружен существующий swap-файл${NC}"
     if confirm_arrow "Перезаписать swap-файл (новый размер: ${SWAP_SIZE})?"; then
         if swapon --show | grep -q '/swapfile'; then
-            sudo swapoff -v /swapfile > /dev/null 2>&1
+            # Очищаем кэш перед swapoff чтобы избежать OOM killer
+            sudo sync
+            echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null 2>&1
+            set +e
+            sudo swapoff /swapfile 2>/dev/null
+            if [ $? -ne 0 ]; then
+                echo -e "${YELLOW}  ⚠ swapoff не удался (недостаточно RAM), принудительно пересоздаём${NC}"
+            fi
+            set -e
         fi
         if grep -q '/swapfile' /etc/fstab; then
             sudo sed -i '\|/swapfile|d' /etc/fstab
