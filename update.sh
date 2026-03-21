@@ -695,14 +695,23 @@ section_end
 # --- 9. Оптимизация systemd ---
 section_start "ОПТИМИЗАЦИЯ SYSTEMD"
 
-# Отключаем дублирующий "Last login" в SSH
+# Отключаем "Last login" в SSH
 if grep -q '^PrintLastLog yes' /etc/ssh/sshd_config 2>/dev/null || ! grep -q '^PrintLastLog' /etc/ssh/sshd_config 2>/dev/null; then
     sudo sed -i 's/^PrintLastLog yes/PrintLastLog no/' /etc/ssh/sshd_config 2>/dev/null
     if ! grep -q '^PrintLastLog' /etc/ssh/sshd_config 2>/dev/null; then
         echo 'PrintLastLog no' | sudo tee -a /etc/ssh/sshd_config > /dev/null
     fi
-    sudo systemctl reload sshd 2>/dev/null || sudo systemctl reload ssh 2>/dev/null || true
+    sudo systemctl restart sshd 2>/dev/null || sudo systemctl restart ssh 2>/dev/null || true
     echo -e "${GREEN}  ✓ SSH PrintLastLog отключен${NC}"
+fi
+
+# Отключаем стандартный Ubuntu MOTD (дублирующий system info)
+if [ -d /etc/update-motd.d ]; then
+    sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
+    echo -e "${GREEN}  ✓ Ubuntu MOTD отключен${NC}"
+fi
+if [ -f /etc/motd ]; then
+    sudo truncate -s 0 /etc/motd 2>/dev/null
 fi
 
 if confirm_arrow "Отключить ненужные системные сервисы?"; then
