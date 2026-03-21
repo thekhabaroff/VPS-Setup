@@ -556,10 +556,6 @@ section_end
 # --- 5. Оптимизация ядра и сети ---
 section_start "ОПТИМИЗАЦИЯ ЯДРА И СЕТИ"
 
-if [ ! -f /etc/sysctl.conf.bak ]; then
-    sudo cp /etc/sysctl.conf /etc/sysctl.conf.bak
-fi
-
 # Удаляем старый файл если остался от предыдущих версий
 sudo rm -f /etc/sysctl.d/99-custom.conf 2>/dev/null
 
