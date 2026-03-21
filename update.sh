@@ -919,6 +919,135 @@ section_end
 # --- Итоговый отчёт ---
 generate_report
 
+# --- Статус системы ---
+show_system_status() {
+    echo ""
+    section_separator
+    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║${NC}${CYAN}${BOLD}                  СТАТУС СИСТЕМЫ                    ${NC}${BLUE}║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    _L() { printf "  %-22s: %s\n" "$1" "$2"; }
+
+    # CPU
+    local _s1 _s2
+    _s1=$(grep '^cpu ' /proc/stat); sleep 0.3; _s2=$(grep '^cpu ' /proc/stat)
+    local CPU_PCT IOW_PCT
+    read -r CPU_PCT IOW_PCT < <(awk -v s1="$_s1" -v s2="$_s2" 'BEGIN{
+        gsub(/ +/," ",s1); gsub(/ +/," ",s2)
+        sub(/^cpu /,"",s1); sub(/^cpu /,"",s2)
+        split(s1,a," "); split(s2,b," ")
+        dt=(b[1]+b[2]+b[3]+b[4]+b[5])-(a[1]+a[2]+a[3]+a[4]+a[5])
+        if(dt>0) print int(((dt-(b[4]-a[4]))*100)/dt), int(((b[5]-a[5])*100)/dt)
+        else print "0 0"
+    }')
+
+    local IP CORES LOAD_AVG KERNEL OS_NAME
+    IP=$(hostname -I | awk '{print $1}')
+    CORES=$(nproc)
+    LOAD_AVG=$(awk '{print $1" "$2" "$3}' /proc/loadavg)
+    KERNEL=$(uname -r)
+    OS_NAME=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'"' -f2)
+
+    # Memory
+    local MEM_TOTAL_KB MEM_AVAIL_KB MEM_USED_MB MEM_TOTAL_MB MEM_PCT
+    MEM_TOTAL_KB=$(awk '/^MemTotal/{print $2}' /proc/meminfo)
+    MEM_AVAIL_KB=$(awk '/^MemAvailable/{print $2}' /proc/meminfo)
+    MEM_USED_MB=$(( (MEM_TOTAL_KB - MEM_AVAIL_KB) / 1024 ))
+    MEM_TOTAL_MB=$(( MEM_TOTAL_KB / 1024 ))
+    MEM_PCT=$(( MEM_USED_MB * 100 / MEM_TOTAL_MB ))
+
+    # Swap
+    local SWAP_TOTAL_KB SWAP_FREE_KB SWAP_USED_MB SWAP_TOTAL_MB SWAP_PCT
+    SWAP_TOTAL_KB=$(awk '/^SwapTotal/{print $2}' /proc/meminfo)
+    SWAP_FREE_KB=$(awk '/^SwapFree/{print $2}' /proc/meminfo)
+    SWAP_USED_MB=$(( (SWAP_TOTAL_KB - SWAP_FREE_KB) / 1024 ))
+    SWAP_TOTAL_MB=$(( SWAP_TOTAL_KB / 1024 ))
+    SWAP_PCT=0
+    [ "$SWAP_TOTAL_MB" -gt 0 ] && SWAP_PCT=$(( SWAP_USED_MB * 100 / SWAP_TOTAL_MB ))
+
+    # Disk
+    local DISK_SZ DISK_USED DISK_PCT
+    read -r _ DISK_SZ DISK_USED _ DISK_PCT _ < <(df -h / | tail -1)
+
+    # Processes
+    local PROC_TOTAL PROC_RUN PROC_ZOMBIE
+    read -r PROC_TOTAL PROC_RUN PROC_ZOMBIE < <(ps --no-headers aux 2>/dev/null | awk '
+        {t++} $8~/^R/{r++} $8~/^Z/{z++}
+        END{print t+0, r+0, z+0}')
+
+    # Network traffic
+    local NET_STR="-"
+    if command -v vnstat &>/dev/null; then
+        NET_STR=$(vnstat --json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    tr = json.load(sys.stdin)['interfaces'][0]['traffic']
+    def h(b):
+        return f'{b/1024**3:.2f} GiB' if b >= 1073741824 else f'{b/1024**2:.0f} MiB'
+    d = (tr.get('day') or [{}])[-1]; m = (tr.get('month') or [{}])[-1]
+    print(f\"Day: [{h(d.get('rx',0))} / {h(d.get('tx',0))}] \u2502 Month: [{h(m.get('rx',0))} / {h(m.get('tx',0))}]\")
+except: print('-')
+" 2>/dev/null || echo "-")
+    fi
+
+    # Docker
+    local DOCKER_STR="-"
+    if command -v docker &>/dev/null; then
+        local D_RUN D_STOP
+        D_RUN=$(docker ps -q 2>/dev/null | wc -l)
+        D_STOP=$(docker ps -aq --filter status=exited 2>/dev/null | wc -l)
+        DOCKER_STR="${D_RUN} running / ${D_STOP} stopped"
+    fi
+
+    # Security
+    local BAN_STR="-" FW_STR="-"
+    command -v fail2ban-client &>/dev/null && BAN_STR="fail2ban"
+    if command -v ufw &>/dev/null; then
+        ufw status 2>/dev/null | grep -q "Status: active" && FW_STR="ufw"
+    fi
+
+    local SSH_PORT SSH_SESS SSH_IPS
+    SSH_PORT=$(grep -m1 '^Port ' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    [ -z "$SSH_PORT" ] && SSH_PORT="22"
+    SSH_SESS=$(who 2>/dev/null | wc -l)
+    SSH_IPS=$(who 2>/dev/null | awk '{print $5}' | tr -d '()' | sort -u | paste -sd ' ' -)
+    [ -z "$SSH_IPS" ] && SSH_IPS="local"
+
+    # Updates
+    local APT_UPD=0 AUTO_UPD="disabled"
+    if [ -f /var/lib/update-notifier/updates-available ]; then
+        APT_UPD=$(grep -oP '^\d+' /var/lib/update-notifier/updates-available 2>/dev/null | head -1 || echo 0)
+    fi
+    grep -q '"1"' /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null && AUTO_UPD="enabled"
+
+    _L "IP Address"   "$IP"
+    _L "OS"           "$OS_NAME"
+    _L "Kernel"       "$KERNEL"
+    _L "Load Average" "Cores: $CORES [$LOAD_AVG]"
+    _L "CPU"          "${CPU_PCT}%"
+    _L "RAM"          "${MEM_PCT}% [${MEM_USED_MB}MB / ${MEM_TOTAL_MB}MB]"
+    _L "SWAP"         "${SWAP_PCT}% [${SWAP_USED_MB}MB / ${SWAP_TOTAL_MB}MB]"
+    _L "Disk"         "${DISK_PCT} [${DISK_USED} / ${DISK_SZ}]"
+    _L "Processes"    "${PROC_TOTAL} total, ${PROC_RUN} running, ${PROC_ZOMBIE} zombie"
+    _L "I/O Wait"     "${IOW_PCT}%"
+    _L "Net Traffic"  "$NET_STR"
+    _L "Docker"       "$DOCKER_STR"
+    echo -e "  ${DIM}~~~~~~ Security ~~~~~~${NC}"
+    _L "Ban Systems"  "$BAN_STR"
+    _L "Firewall"     "$FW_STR"
+    _L "SSH Port"     "$SSH_PORT"
+    _L "SSH Sessions" "$SSH_SESS"
+    _L "SSH IPs"      "$SSH_IPS"
+    echo -e "  ${DIM}~~~~~~~~~~~~~~~~~~~~~${NC}"
+    _L "Apt Updates"  "${APT_UPD} package(s) can be updated"
+    _L "Auto Updates" "$AUTO_UPD"
+    echo ""
+}
+
+show_system_status
+
 echo -e "${GREEN}${BOLD}  === ВСЁ ГОТОВО! ===${NC}"
 echo ""
 
