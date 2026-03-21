@@ -560,13 +560,16 @@ if [ ! -f /etc/sysctl.conf.bak ]; then
     sudo cp /etc/sysctl.conf /etc/sysctl.conf.bak
 fi
 
+# Удаляем старый файл если остался от предыдущих версий
+sudo rm -f /etc/sysctl.d/99-custom.conf 2>/dev/null
+
 # Загружаем nf_conntrack до применения sysctl
 if ! lsmod | grep -q nf_conntrack; then
     sudo modprobe nf_conntrack > /dev/null 2>&1
     echo -e "${GREEN}  ✓ Модуль nf_conntrack загружен${NC}"
 fi
 
-cat <<'EOF' | sudo tee /etc/sysctl.d/99-custom.conf > /dev/null
+cat <<'EOF' | sudo tee /etc/sysctl.conf > /dev/null
 # --- BBR & CONGESTION CONTROL ---
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
@@ -683,7 +686,7 @@ while IFS= read -r line; do
         param_name=$(echo "$line" | cut -d'=' -f1)
         echo -e "${DIM}  · ${param_name} — не поддерживается ядром, пропущен${NC}"
     fi
-done < /etc/sysctl.d/99-custom.conf
+done < /etc/sysctl.conf
 
 if [ $SYSCTL_ERRORS -eq 0 ]; then
     echo -e "${GREEN}  ✓ Все параметры применены${NC}"
