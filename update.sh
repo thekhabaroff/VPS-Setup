@@ -695,6 +695,16 @@ section_end
 # --- 9. Оптимизация systemd ---
 section_start "ОПТИМИЗАЦИЯ SYSTEMD"
 
+# Отключаем дублирующий "Last login" в SSH
+if grep -q '^PrintLastLog yes' /etc/ssh/sshd_config 2>/dev/null || ! grep -q '^PrintLastLog' /etc/ssh/sshd_config 2>/dev/null; then
+    sudo sed -i 's/^PrintLastLog yes/PrintLastLog no/' /etc/ssh/sshd_config 2>/dev/null
+    if ! grep -q '^PrintLastLog' /etc/ssh/sshd_config 2>/dev/null; then
+        echo 'PrintLastLog no' | sudo tee -a /etc/ssh/sshd_config > /dev/null
+    fi
+    sudo systemctl reload sshd 2>/dev/null || sudo systemctl reload ssh 2>/dev/null || true
+    echo -e "${GREEN}  ✓ SSH PrintLastLog отключен${NC}"
+fi
+
 if confirm_arrow "Отключить ненужные системные сервисы?"; then
     SERVICES_TO_DISABLE=(
         "bluetooth.service"
