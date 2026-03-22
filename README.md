@@ -216,7 +216,7 @@ ETdRsuSYgpijG4RFckEQUoLfQ4CctibcoshTKyk1sCoW
 
 ## 📄 Лицензия
 
-[MIT](LICENSE)
+[MIT](LICENSE) - — используйте свободно, упоминание автора приветствуется.
 
 ---
 
