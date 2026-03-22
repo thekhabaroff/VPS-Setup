@@ -148,6 +148,64 @@ sysctl net.ipv4.tcp_congestion_control  # должно быть bbr
 
 ---
 
+## ☕ Поддержать проект
+
+Если скрипт сэкономил тебе время — можешь поддержать разработку криптовалютой:
+
+<details>
+<summary><b>💛 USDT (TRC-20)</b></summary>
+
+```
+TВАШ_АДРЕС_USDT_TRC20
+```
+
+</details>
+
+<details>
+<summary><b>🟠 Bitcoin (BTC)</b></summary>
+
+```
+ВАШ_АДРЕС_BTC
+```
+
+</details>
+
+<details>
+<summary><b>🔷 Ethereum (ERC-20)</b></summary>
+
+```
+0xВАШ_АДРЕС_ETH
+```
+
+</details>
+
+<details>
+<summary><b>🟣 TON</b></summary>
+
+```
+ВАШ_АДРЕС_TON
+```
+
+</details>
+
+<details>
+<summary><b>🐶 Solana (SOL)</b></summary>
+
+```
+ВАШ_АДРЕС_SOL
+```
+
+</details>
+
+> Каждый донат мотивирует развивать проект дальше 🙏
+
+---
+
+<div align="center">Если скрипт оказался полезным — поставь ⭐ звезду!</div>
+
+
+---
+
 ## 📄 Лицензия
 
 [MIT](LICENSE)
