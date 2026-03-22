@@ -27,12 +27,6 @@ VPS-Setup
 ---
 
 ## ⚡ Быстрый старт
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/main/update.sh | sudo bash
-```
-
-Или вручную
 ```bash
 wget https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/refs/heads/main/update.sh
 chmod +x update.sh
