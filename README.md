@@ -153,28 +153,28 @@ sysctl net.ipv4.tcp_congestion_control  # должно быть bbr
 Если скрипт сэкономил тебе время — можешь поддержать разработку криптовалютой:
 
 <details>
-<summary><b>💛 USDT (TRC-20)</b></summary>
+<summary><b>🟠 BTC</b></summary>
 
 ```
-TВАШ_АДРЕС_USDT_TRC20
-```
-
-</details>
-
-<details>
-<summary><b>🟠 Bitcoin (BTC)</b></summary>
-
-```
-ВАШ_АДРЕС_BTC
+1CAWPNFJMAWxCany1A317yqHoZz4mq9MTE
 ```
 
 </details>
 
 <details>
-<summary><b>🔷 Ethereum (ERC-20)</b></summary>
+<summary><b>🔷 EVM</b></summary>
 
 ```
-0xВАШ_АДРЕС_ETH
+0xbdfa3a427e457a99d7254af04b44fe76c347bd10
+```
+
+</details>
+
+<details>
+<summary><b>💛 TRC</b></summary>
+
+```
+TFGa8KRdcyCv3gk6khGU8NQvR8ot5UtiP5
 ```
 
 </details>
@@ -183,25 +183,25 @@ TВАШ_АДРЕС_USDT_TRC20
 <summary><b>🟣 TON</b></summary>
 
 ```
-ВАШ_АДРЕС_TON
+UQCacF30U98zSCbzd1NM5qMjjdkTygJwMjgDURobdXTIDN4-
 ```
 
 </details>
 
 <details>
-<summary><b>🐶 Solana (SOL)</b></summary>
+<summary><b>🐶 SOL</b></summary>
 
 ```
-ВАШ_АДРЕС_SOL
+ETdRsuSYgpijG4RFckEQUoLfQ4CctibcoshTKyk1sCoW
 ```
 
 </details>
 
 <details>
-<summary><b>🔵 Aptos (APT)</b></summary>
+<summary><b>🔵 APT</b></summary>
 
 ```
-ВАШ_АДРЕС_APT
+0x82b02deef3c3d8d21a665c53d9ea2e046813b6a92085efbc241b8acf69dc3af5
 ```
 
 </details>
@@ -216,3 +216,5 @@ TВАШ_АДРЕС_USDT_TRC20
 
 ---
 <div align="center">Если скрипт оказался полезным — поставь ⭐ звезду!</div>
+
+<summary><b>💛 USDT (TRC-20)</b></summary>
