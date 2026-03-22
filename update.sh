@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================
-#  UBUNTU SERVER OPTIMIZATION SCRIPT v3.0
+#  UBUNTU SERVER OPTIMIZATION SCRIPT v3.1
 #  Комплексная оптимизация и настройка сервера
 # ============================================================================
 
@@ -16,6 +16,15 @@ fi
 if [ ! -f /etc/debian_version ]; then
     echo "Ошибка: Этот скрипт предназначен только для Ubuntu/Debian."
     exit 1
+fi
+
+# Если запущен через pipe (curl|bash) — переключаем stdin на терминал
+if [ ! -t 0 ]; then
+    exec </dev/tty 2>/dev/null || {
+        echo "Ошибка: запустите скрипт из файла, а не через pipe."
+        echo "Используйте: curl -fsSL URL -o /tmp/update.sh && sudo bash /tmp/update.sh"
+        exit 1
+    }
 fi
 
 # Останавливаем выполнение скрипта при ошибке команд
@@ -46,9 +55,6 @@ AUTO_MODE=false
 # ФУНКЦИИ ИНТЕРФЕЙСА
 # ============================================================================
 
-# --- Универсальное arrow-key меню ---
-# Использование: select_option "Заголовок" option1 option2 ...
-# Возвращает индекс выбранного пункта (0-based) в переменной SELECTED
 select_option() {
     local title="$1"
     shift
@@ -56,27 +62,19 @@ select_option() {
     local count=${#options[@]}
     local current=0
 
-    # Сохраняем настройки терминала
     local saved_tty
     saved_tty=$(stty -g 2>/dev/null)
 
-    # Скрываем курсор
     printf '\033[?25l'
 
-    # Функция отрисовки меню
     _draw_menu() {
-        # Переходим вверх на count+1 строк и очищаем
         local i
         for ((i = 0; i < count + 1; i++)); do
             printf '\033[A'
         done
         printf '\r'
-
-        # Заголовок
         printf '\033[2K'
         echo -e "${CYAN}${title}${NC}"
-
-        # Опции
         for ((i = 0; i < count; i++)); do
             printf '\033[2K'
             if [ $i -eq $current ]; then
@@ -87,7 +85,6 @@ select_option() {
         done
     }
 
-    # Первая отрисовка (резервируем место)
     echo -e "${CYAN}${title}${NC}"
     local i
     for ((i = 0; i < count; i++)); do
@@ -99,19 +96,16 @@ select_option() {
     done
 
     while true; do
-        # Читаем один символ через stty raw + dd
         local char
         stty raw -echo 2>/dev/null
         char=$(dd bs=1 count=1 2>/dev/null)
         stty "$saved_tty" 2>/dev/null
 
         if [[ "$char" == $'\x1b' ]]; then
-            # Читаем ещё 2 символа escape-последовательности
             local seq
             stty raw -echo 2>/dev/null
             seq=$(dd bs=1 count=2 2>/dev/null)
             stty "$saved_tty" 2>/dev/null
-
             case "$seq" in
                 '[A') ((current > 0)) && current=$((current - 1)); _draw_menu ;;
                 '[B') ((current < count - 1)) && current=$((current + 1)); _draw_menu ;;
@@ -121,24 +115,19 @@ select_option() {
         fi
     done
 
-    # Показываем курсор
     printf '\033[?25h'
     SELECTED=$current
 }
 
-# --- Подтверждение Да/Нет стрелочками ---
-# Возвращает 0 (Да) или 1 (Нет)
 confirm_arrow() {
     if [ "$AUTO_MODE" = true ]; then
         return 0
     fi
-
     local prompt="$1"
     select_option "$prompt" "Да" "Нет"
     return "$SELECTED"
 }
 
-# --- Функция спиннера ---
 spinner() {
     local pid=$1
     local message=$2
@@ -160,7 +149,6 @@ spinner() {
     printf "\r${GREEN}  %s ✓ ${DIM}(%ss)${NC}\n" "$message" "$total_time"
 }
 
-# --- Функция прогресс-бара ---
 show_progress() {
     local current=$1
     local total=$2
@@ -174,11 +162,9 @@ show_progress() {
     echo -e "] ${BOLD}${percentage}%%${NC} ${DIM}(${current}/${total})${NC}"
 }
 
-# --- Функция начала секции ---
 section_start() {
     CURRENT_SECTION=$((CURRENT_SECTION + 1))
     SECTION_START_TIME=$(date +%s)
-
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     show_progress $CURRENT_SECTION $TOTAL_SECTIONS
@@ -186,7 +172,6 @@ section_start() {
     echo ""
 }
 
-# --- Функция завершения секции ---
 section_end() {
     local end_time
     end_time=$(date +%s)
@@ -194,7 +179,6 @@ section_end() {
     echo -e "${DIM}  ── Выполнено за ${duration}s${NC}"
 }
 
-# --- Функция разделителя ---
 section_separator() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
@@ -203,7 +187,6 @@ section_separator() {
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ============================================================================
 
-# --- Определение размера SWAP ---
 calculate_swap_size() {
     local ram_mb
     ram_mb=$(free -m | awk '/^Mem:/{print $2}')
@@ -212,13 +195,6 @@ calculate_swap_size() {
         echo "2G"
         return
     fi
-
-    # RAM < 1GB  → SWAP = 2x RAM (мин 1G)
-    # RAM 1-2GB  → SWAP = 2x RAM
-    # RAM 2-4GB  → SWAP = RAM
-    # RAM 4-8GB  → SWAP = RAM/2 (мин 2G)
-    # RAM 8-16GB → SWAP = 4G
-    # RAM > 16GB → SWAP = 4G
 
     if [ "$ram_mb" -lt 1024 ]; then
         local swap_mb=$((ram_mb * 2))
@@ -239,7 +215,6 @@ calculate_swap_size() {
     fi
 }
 
-# --- Создание SWAP файла ---
 create_swap_file() {
     local swap_size=$1
 
@@ -305,11 +280,9 @@ create_swap_file() {
 
     sudo sysctl vm.swappiness=10 > /dev/null 2>&1
     echo -e "${GREEN}  ✓ Swappiness установлен на 10${NC}"
-
     return 0
 }
 
-# --- Установка утилиты ---
 install_package() {
     local package=$1
     local cmd_name=${2:-$1}
@@ -342,7 +315,7 @@ show_menu() {
     clear
     echo ""
     echo -e "${BLUE}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${NC}${CYAN}${BOLD}       UBUNTU SERVER OPTIMIZATION SCRIPT v3.0        ${NC}${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}${CYAN}${BOLD}       UBUNTU SERVER OPTIMIZATION SCRIPT v3.1        ${NC}${BLUE}║${NC}"
     echo -e "${BLUE}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -356,7 +329,6 @@ show_menu() {
     esac
 }
 
-# --- Раздел "Что будет сделано" ---
 show_summary() {
     local recommended_swap
     recommended_swap=$(calculate_swap_size)
@@ -371,7 +343,8 @@ show_summary() {
     echo -e "  ${WHITE}→${NC} Установка ядра XanMod (BBRv3, low-latency)"
     echo -e "  ${WHITE}→${NC} Установка утилит (curl, wget, git, ping, unzip, mtr)"
     echo -e "  ${WHITE}→${NC} Создание SWAP файла (${recommended_swap}, swappiness=10)"
-    echo -e "  ${WHITE}→${NC} Оптимизация ядра и сети (BBR, TCP, буферы, IPv6)"
+    echo -e "  ${WHITE}→${NC} Оптимизация ядра и сети (BBR, TCP, буферы)"
+    echo -e "  ${WHITE}→${NC} Отключение IPv6 через GRUB (постоянно)"
     echo -e "  ${WHITE}→${NC} Оптимизация systemd и journal"
     echo -e "  ${WHITE}→${NC} Настройка logrotate"
     echo -e "  ${WHITE}→${NC} Увеличение лимитов ресурсов"
@@ -390,7 +363,6 @@ show_summary() {
     FREED_SPACE_BEFORE=$(df / | tail -1 | awk '{print $3}')
 }
 
-# --- Итоговый отчёт ---
 generate_report() {
     local script_end_time
     script_end_time=$(date +%s)
@@ -416,15 +388,14 @@ generate_report() {
         else
             local swap_info
             swap_info=$(swapon --show=SIZE --noheadings /swapfile 2>/dev/null | head -1)
-            if [ -n "$swap_info" ]; then
-                swap_size_info="$swap_info"
-            fi
+            [ -n "$swap_info" ] && swap_size_info="$swap_info"
         fi
     fi
 
     echo -e "  ${GREEN}✓${NC} Установлено утилит: ${BOLD}$INSTALLED_UTILS${NC}"
     echo -e "  ${GREEN}✓${NC} SWAP: ${BOLD}${swap_size_info}${NC} (swappiness=10)"
     echo -e "  ${GREEN}✓${NC} BBR и TCP оптимизации: ${BOLD}применены${NC}"
+    echo -e "  ${GREEN}✓${NC} IPv6: ${BOLD}отключён через GRUB${NC}"
     echo -e "  ${GREEN}✓${NC} Отключено сервисов: ${BOLD}$DISABLED_SERVICES${NC}"
 
     if [ $freed_space -gt 0 ]; then
@@ -476,7 +447,6 @@ section_start "DOCKER"
 
 install_docker() {
     if ! command -v docker &> /dev/null; then
-        # Docker не установлен — устанавливаем
         echo -e "${DIM}  Docker не найден, устанавливаем...${NC}"
         curl -fsSL https://get.docker.com -o /tmp/get-docker.sh 2>/dev/null
         sudo sh /tmp/get-docker.sh > /dev/null 2>&1 &
@@ -485,7 +455,6 @@ install_docker() {
         sudo usermod -aG docker "${SUDO_USER:-$USER}" > /dev/null 2>&1
         echo -e "${GREEN}  ✓ Docker установлен${NC}"
     else
-        # Docker установлен — проверяем обновления
         local current_version
         current_version=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "unknown")
         echo -e "${DIM}  Docker ${current_version} установлен, проверяем обновления...${NC}"
@@ -504,7 +473,6 @@ install_docker() {
         fi
     fi
 
-    # Docker Compose плагин
     if command -v docker &> /dev/null; then
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq docker-compose-plugin > /dev/null 2>&1 &
         spinner $! "Docker Compose плагин"
@@ -518,30 +486,25 @@ section_end
 section_start "ЯДРО XANMOD"
 
 install_xanmod() {
-    # Проверяем архитектуру
     if [ "$(uname -m)" != "x86_64" ]; then
         echo -e "${DIM}  · XanMod поддерживает только x86_64, пропущено${NC}"
         return 0
     fi
 
-    # Проверяем, не установлено ли уже
     if uname -r | grep -qi xanmod; then
         echo -e "${DIM}  · XanMod ядро уже установлено ($(uname -r))${NC}"
         return 0
     fi
 
-    # Зависимости
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq \
         curl wget gnupg lsb-release ca-certificates > /dev/null 2>&1 &
     spinner $! "Зависимости для XanMod"
 
-    # GPG-ключ
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://dl.xanmod.org/archive.key \
         | gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg 2>/dev/null
     echo -e "${GREEN}  ✓ GPG-ключ XanMod добавлен${NC}"
 
-    # Репозиторий
     local CODENAME
     CODENAME=$(lsb_release -sc 2>/dev/null || echo "noble")
     cat > /etc/apt/sources.list.d/xanmod-release.sources <<XANMOD_REPO
@@ -553,7 +516,6 @@ Signed-By: /etc/apt/keyrings/xanmod-archive-keyring.gpg
 XANMOD_REPO
     echo -e "${GREEN}  ✓ Репозиторий XanMod добавлен (${CODENAME})${NC}"
 
-    # Определение уровня x86-64
     local CPU_LEVEL
     CPU_LEVEL=$(awk -f <(wget -qO - https://dl.xanmod.org/check_x86-64_psabi.sh) 2>/dev/null \
         | grep -oP 'x86-64-v\K[0-9]' | head -1 || true)
@@ -565,11 +527,9 @@ XANMOD_REPO
         echo -e "${GREEN}  ✓ CPU поддерживает x86-64-v${CPU_LEVEL}${NC}"
     fi
 
-    # Обновление списков
     sudo apt-get update -qq > /dev/null 2>&1 &
     spinner $! "Обновление списков пакетов"
 
-    # Установка ядра
     local PACKAGE="linux-xanmod-edge-x64v${CPU_LEVEL}"
     if apt-cache show "$PACKAGE" > /dev/null 2>&1; then
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq "$PACKAGE" > /dev/null 2>&1 &
@@ -603,14 +563,12 @@ install_package "iputils-ping" "ping"
 install_package "unzip" "unzip"
 install_package "mtr" "mtr"
 
-# Speedtest CLI (Ookla)
 if ! command -v speedtest &> /dev/null; then
     wget -q https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz -O /tmp/speedtest.tgz 2>/dev/null &
     spinner $! "Скачивание Speedtest CLI"
     tar -xzf /tmp/speedtest.tgz -C /tmp/ 2>/dev/null
     sudo mv /tmp/speedtest /usr/local/bin/speedtest 2>/dev/null
     rm -f /tmp/speedtest.tgz /tmp/speedtest.md 2>/dev/null
-    # Алиас с авто-принятием лицензии
     PROFILE_HOME=$(eval echo ~"${SUDO_USER:-$USER}")
     if ! grep -q 'alias speedtest=' "$PROFILE_HOME/.bashrc" 2>/dev/null; then
         echo "alias speedtest='speedtest --accept-license --accept-gdpr'" >> "$PROFILE_HOME/.bashrc"
@@ -623,7 +581,7 @@ fi
 
 section_end
 
-# --- 4. Настройка SWAP ---
+# --- 5. Настройка SWAP ---
 section_start "НАСТРОЙКА SWAP"
 
 SWAP_SIZE=$(calculate_swap_size)
@@ -641,7 +599,6 @@ if [ -f /swapfile ]; then
     echo -e "${DIM}  Обнаружен существующий swap-файл${NC}"
     if confirm_arrow "Перезаписать swap-файл (новый размер: ${SWAP_SIZE})?"; then
         if swapon --show | grep -q '/swapfile'; then
-            # Очищаем кэш перед swapoff чтобы избежать OOM killer
             sudo sync
             echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null 2>&1
             set +e
@@ -655,7 +612,6 @@ if [ -f /swapfile ]; then
             sudo sed -i '\|/swapfile|d' /etc/fstab
         fi
         sudo rm -f /swapfile
-
         if create_swap_file "$SWAP_SIZE"; then
             echo -e "${GREEN}  ✓ Swap-файл пересоздан${NC}"
         else
@@ -678,19 +634,20 @@ fi
 
 section_end
 
-# --- 5. Оптимизация ядра и сети ---
+# --- 6. Оптимизация ядра и сети ---
 section_start "ОПТИМИЗАЦИЯ ЯДРА И СЕТИ"
 
-# Удаляем старый файл если остался от предыдущих версий
+# Удаляем старые файлы от предыдущих версий
 sudo rm -f /etc/sysctl.d/99-custom.conf 2>/dev/null
+sudo rm -f /etc/sysctl.d/99-optimization.conf 2>/dev/null
 
-# Загружаем nf_conntrack до применения sysctl
 if ! lsmod | grep -q nf_conntrack; then
     sudo modprobe nf_conntrack > /dev/null 2>&1
     echo -e "${GREEN}  ✓ Модуль nf_conntrack загружен${NC}"
 fi
 
-cat <<'EOF' | sudo tee /etc/sysctl.conf > /dev/null
+# Пишем в sysctl.d — гарантированно применяется systemd-sysctl.service при загрузке
+cat <<'EOF' | sudo tee /etc/sysctl.d/99-optimization.conf > /dev/null
 # --- BBR & CONGESTION CONTROL ---
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
@@ -790,24 +747,17 @@ net.core.busy_read=50
 
 # --- IP FORWARDING ---
 net.ipv4.ip_forward=1
-
-# --- DISABLE IPv6 ---
-net.ipv6.conf.all.disable_ipv6=1
-net.ipv6.conf.default.disable_ipv6=1
-net.ipv6.conf.lo.disable_ipv6=1
 EOF
 
-# Применяем параметры по одному, пропуская неподдерживаемые ядром
 SYSCTL_ERRORS=0
 while IFS= read -r line; do
-    # Пропускаем комментарии и пустые строки
     [[ -z "$line" || "$line" == \#* ]] && continue
     if ! sudo sysctl -w "$line" > /dev/null 2>&1; then
         SYSCTL_ERRORS=$((SYSCTL_ERRORS + 1))
         param_name=$(echo "$line" | cut -d'=' -f1)
         echo -e "${DIM}  · ${param_name} — не поддерживается ядром, пропущен${NC}"
     fi
-done < /etc/sysctl.conf
+done < /etc/sysctl.d/99-optimization.conf
 
 if [ $SYSCTL_ERRORS -eq 0 ]; then
     echo -e "${GREEN}  ✓ Все параметры применены${NC}"
@@ -815,12 +765,28 @@ else
     echo -e "${GREEN}  ✓ Параметры применены${NC} ${DIM}($SYSCTL_ERRORS пропущено)${NC}"
 fi
 
+# --- Отключение IPv6 через GRUB (постоянно) ---
+if confirm_arrow "Отключить IPv6 через GRUB (постоянно)?"; then
+    if [ -f /etc/default/grub ]; then
+        if ! grep -q 'ipv6.disable=1' /etc/default/grub; then
+            sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 ipv6.disable=1"/' /etc/default/grub
+            sudo update-grub > /dev/null 2>&1
+            echo -e "${GREEN}  ✓ IPv6 отключён через GRUB (вступит в силу после перезагрузки)${NC}"
+        else
+            echo -e "${DIM}  · IPv6 уже отключён через GRUB${NC}"
+        fi
+    else
+        echo -e "${YELLOW}  ⚠ /etc/default/grub не найден, пропущено${NC}"
+    fi
+else
+    echo -e "${DIM}  · Отключение IPv6 пропущено${NC}"
+fi
+
 section_end
 
-# --- 9. Оптимизация systemd ---
+# --- 7. Оптимизация systemd ---
 section_start "ОПТИМИЗАЦИЯ SYSTEMD"
 
-# Отключаем "Last login" в SSH
 if grep -q '^PrintLastLog yes' /etc/ssh/sshd_config 2>/dev/null || ! grep -q '^PrintLastLog' /etc/ssh/sshd_config 2>/dev/null; then
     sudo sed -i 's/^PrintLastLog yes/PrintLastLog no/' /etc/ssh/sshd_config 2>/dev/null
     if ! grep -q '^PrintLastLog' /etc/ssh/sshd_config 2>/dev/null; then
@@ -830,7 +796,6 @@ if grep -q '^PrintLastLog yes' /etc/ssh/sshd_config 2>/dev/null || ! grep -q '^P
     echo -e "${GREEN}  ✓ SSH PrintLastLog отключен${NC}"
 fi
 
-# Отключаем стандартный Ubuntu MOTD (дублирующий system info)
 if [ -d /etc/update-motd.d ]; then
     sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
     echo -e "${GREEN}  ✓ Ubuntu MOTD отключен${NC}"
@@ -839,11 +804,9 @@ if [ -f /etc/motd ]; then
     sudo truncate -s 0 /etc/motd 2>/dev/null
 fi
 
-# Устанавливаем наш статус системы как MOTD при SSH-входе
 cat << 'MOTD_SCRIPT' | sudo tee /etc/profile.d/server-status.sh > /dev/null
 #!/bin/bash
-# Server status — выводится при SSH-входе
-[ -z "$PS1" ] && return  # только интерактивные сессии
+[ -z "$PS1" ] && return
 
 L() { printf " %-22s: %s\n" "$1" "$2"; }
 
@@ -857,7 +820,9 @@ read -r CPU_PCT IOW_PCT < <(awk -v s1="$_s1" -v s2="$_s2" 'BEGIN{
     else print "0 0"
 }')
 
-IP=$(hostname -I | awk '{print $1}')
+IPV4=$(hostname -I | awk '{print $1}')
+IPV6=$(ip -6 addr show scope global 2>/dev/null | awk '/inet6/{print $2}' | cut -d'/' -f1 | head -1)
+[ -z "$IPV6" ] && IPV6="disabled"
 CORES=$(nproc)
 LOAD=$(awk '{print $1" "$2" "$3}' /proc/loadavg)
 KERNEL=$(uname -r)
@@ -870,7 +835,7 @@ MEM_TOTAL_MB=$(( MEM_TOTAL_KB / 1024 ))
 MEM_PCT=$(( MEM_USED_MB * 100 / MEM_TOTAL_MB ))
 
 SWAP_TOTAL_KB=$(awk '/^SwapTotal/{print $2}' /proc/meminfo)
-SWAP_FREE_KB=$( awk '/^SwapFree/{print $2}'  /proc/meminfo)
+SWAP_FREE_KB=$(awk '/^SwapFree/{print $2}' /proc/meminfo)
 SWAP_USED_MB=$(( (SWAP_TOTAL_KB - SWAP_FREE_KB) / 1024 ))
 SWAP_TOTAL_MB=$(( SWAP_TOTAL_KB / 1024 ))
 SWAP_PCT=0
@@ -925,7 +890,8 @@ AUTO_UPD="disabled"
 grep -q '"1"' /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null && AUTO_UPD="enabled"
 
 echo ""
-L "IP Address"   "$IP"
+L "IP Address"   "$IPV4"
+L "IPv6"         "$IPV6"
 L "OS"           "$OS"
 L "Kernel"       "$KERNEL"
 L "Load Average" "Cores: $CORES [$LOAD]"
@@ -977,7 +943,7 @@ fi
 
 section_end
 
-# --- 9.5. Оптимизация systemd journal ---
+# --- 8. Оптимизация systemd journal ---
 section_start "ОПТИМИЗАЦИЯ JOURNAL"
 
 if confirm_arrow "Оптимизировать systemd journal?"; then
@@ -991,7 +957,6 @@ if confirm_arrow "Оптимизировать systemd journal?"; then
     sudo sed -i 's/^#MaxRetentionSec=.*/MaxRetentionSec=7day/' /etc/systemd/journald.conf
     sudo sed -i 's/^#MaxFileSec=.*/MaxFileSec=1day/' /etc/systemd/journald.conf
     sudo sed -i 's/^#Compress=.*/Compress=yes/' /etc/systemd/journald.conf
-
     sudo sed -i 's/^SystemMaxUse=.*/SystemMaxUse=500M/' /etc/systemd/journald.conf
     sudo sed -i 's/^SystemKeepFree=.*/SystemKeepFree=100M/' /etc/systemd/journald.conf
     sudo sed -i 's/^SystemMaxFileSize=.*/SystemMaxFileSize=50M/' /etc/systemd/journald.conf
@@ -1007,7 +972,7 @@ fi
 
 section_end
 
-# --- 10. Настройка logrotate ---
+# --- 9. Настройка logrotate ---
 section_start "НАСТРОЙКА LOGROTATE"
 
 if confirm_arrow "Оптимизировать ротацию логов?"; then
@@ -1038,7 +1003,6 @@ if confirm_arrow "Оптимизировать ротацию логов?"; then
     notifempty
 }
 EOF
-
     echo -e "${GREEN}  ✓ Logrotate настроен${NC}"
 else
     echo -e "${DIM}  · Настройка logrotate пропущена${NC}"
@@ -1046,7 +1010,7 @@ fi
 
 section_end
 
-# --- 11. Лимиты ресурсов ---
+# --- 10. Лимиты ресурсов ---
 section_start "ЛИМИТЫ РЕСУРСОВ"
 
 if confirm_arrow "Увеличить лимиты файловых дескрипторов?"; then
@@ -1081,7 +1045,7 @@ fi
 
 section_end
 
-# --- 9. Очистка ---
+# --- 11. Очистка ---
 section_start "ОЧИСТКА СИСТЕМЫ"
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -yqq > /dev/null 2>&1 &
@@ -1118,7 +1082,6 @@ fi
 sudo journalctl --vacuum-time=7d --vacuum-size=100M > /dev/null 2>&1 &
 spinner $! "Очистка журналов (>7 дней / >100MB)"
 
-# Удаляем только старые файлы
 sudo find /tmp -type f -atime +1 -delete 2>/dev/null || true
 sudo find /var/tmp -type f -atime +1 -delete 2>/dev/null || true
 echo -e "${GREEN}  ✓ Временные файлы очищены${NC}"
@@ -1128,7 +1091,6 @@ if confirm_arrow "Очистить корзину для всех пользов
 
     if [ -n "${SUDO_USER:-}" ]; then
         USER_HOME=$(eval echo ~"$SUDO_USER")
-
         if [ -d "$USER_HOME/.local/share/Trash" ]; then
             TRASH_SIZE=$(du -sb "$USER_HOME/.local/share/Trash" 2>/dev/null | awk '{print $1}')
             TRASH_SIZE_HR=$(du -sh "$USER_HOME/.local/share/Trash" 2>/dev/null | awk '{print $1}')
@@ -1152,7 +1114,6 @@ if confirm_arrow "Очистить корзину для всех пользов
         if [ -d "$user_home/.local/share/Trash" ]; then
             username=$(basename "$user_home")
             [ "$username" = "${SUDO_USER:-}" ] && continue
-
             TRASH_SIZE=$(du -sb "$user_home/.local/share/Trash" 2>/dev/null | awk '{print $1}')
             if [ "$TRASH_SIZE" -gt 4096 ]; then
                 TRASH_SIZE_HR=$(du -sh "$user_home/.local/share/Trash" 2>/dev/null | awk '{print $1}')
@@ -1177,7 +1138,6 @@ generate_report
 
 # --- Статус системы ---
 show_system_status() {
-    # Отключаем set -e для сбора статуса — многие команды могут возвращать ненулевой код
     set +e
     echo ""
     section_separator
@@ -1188,7 +1148,6 @@ show_system_status() {
 
     _L() { printf "  %-22s: %s\n" "$1" "$2"; }
 
-    # CPU
     local _s1 _s2
     _s1=$(grep '^cpu ' /proc/stat); sleep 0.3; _s2=$(grep '^cpu ' /proc/stat)
     local CPU_PCT IOW_PCT
@@ -1201,14 +1160,15 @@ show_system_status() {
         else print "0 0"
     }')
 
-    local IP CORES LOAD_AVG KERNEL OS_NAME
-    IP=$(hostname -I | awk '{print $1}')
+    local IPV4 IPV6 CORES LOAD_AVG KERNEL OS_NAME
+    IPV4=$(hostname -I | awk '{print $1}')
+    IPV6=$(ip -6 addr show scope global 2>/dev/null | awk '/inet6/{print $2}' | cut -d'/' -f1 | head -1)
+    [ -z "$IPV6" ] && IPV6="disabled"
     CORES=$(nproc)
     LOAD_AVG=$(awk '{print $1" "$2" "$3}' /proc/loadavg)
     KERNEL=$(uname -r)
     OS_NAME=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'"' -f2)
 
-    # Memory
     local MEM_TOTAL_KB MEM_AVAIL_KB MEM_USED_MB MEM_TOTAL_MB MEM_PCT
     MEM_TOTAL_KB=$(awk '/^MemTotal/{print $2}' /proc/meminfo)
     MEM_AVAIL_KB=$(awk '/^MemAvailable/{print $2}' /proc/meminfo)
@@ -1216,7 +1176,6 @@ show_system_status() {
     MEM_TOTAL_MB=$(( MEM_TOTAL_KB / 1024 ))
     MEM_PCT=$(( MEM_USED_MB * 100 / MEM_TOTAL_MB ))
 
-    # Swap
     local SWAP_TOTAL_KB SWAP_FREE_KB SWAP_USED_MB SWAP_TOTAL_MB SWAP_PCT
     SWAP_TOTAL_KB=$(awk '/^SwapTotal/{print $2}' /proc/meminfo)
     SWAP_FREE_KB=$(awk '/^SwapFree/{print $2}' /proc/meminfo)
@@ -1225,17 +1184,14 @@ show_system_status() {
     SWAP_PCT=0
     [ "$SWAP_TOTAL_MB" -gt 0 ] && SWAP_PCT=$(( SWAP_USED_MB * 100 / SWAP_TOTAL_MB ))
 
-    # Disk
     local DISK_SZ DISK_USED DISK_PCT
     read -r _ DISK_SZ DISK_USED _ DISK_PCT _ < <(df -h / | tail -1)
 
-    # Processes
     local PROC_TOTAL PROC_RUN PROC_ZOMBIE
     read -r PROC_TOTAL PROC_RUN PROC_ZOMBIE < <(ps --no-headers aux 2>/dev/null | awk '
         {t++} $8~/^R/{r++} $8~/^Z/{z++}
         END{print t+0, r+0, z+0}')
 
-    # Network traffic
     local NET_STR="-"
     if command -v vnstat &>/dev/null; then
         NET_STR=$(vnstat --json 2>/dev/null | python3 -c "
@@ -1245,12 +1201,11 @@ try:
     def h(b):
         return f'{b/1024**3:.2f} GiB' if b >= 1073741824 else f'{b/1024**2:.0f} MiB'
     d = (tr.get('day') or [{}])[-1]; m = (tr.get('month') or [{}])[-1]
-    print(f\"Day: [{h(d.get('rx',0))} / {h(d.get('tx',0))}] \u2502 Month: [{h(m.get('rx',0))} / {h(m.get('tx',0))}]\")
+    print(f\"Day: [{h(d.get('rx',0))} / {h(d.get('tx',0))}] | Month: [{h(m.get('rx',0))} / {h(m.get('tx',0))}]\")
 except: print('-')
 " 2>/dev/null || echo "-")
     fi
 
-    # Docker
     local DOCKER_STR="-"
     if command -v docker &>/dev/null; then
         local D_RUN D_STOP
@@ -1259,7 +1214,6 @@ except: print('-')
         DOCKER_STR="${D_RUN} running / ${D_STOP} stopped"
     fi
 
-    # Security
     local BAN_STR="-" FW_STR="-"
     command -v fail2ban-client &>/dev/null && BAN_STR="fail2ban"
     if command -v ufw &>/dev/null; then
@@ -1273,14 +1227,14 @@ except: print('-')
     SSH_IPS=$(who 2>/dev/null | awk '{print $5}' | tr -d '()' | sort -u | paste -sd ' ' -)
     [ -z "$SSH_IPS" ] && SSH_IPS="local"
 
-    # Updates
     local APT_UPD=0 AUTO_UPD="disabled"
     if [ -f /var/lib/update-notifier/updates-available ]; then
         APT_UPD=$(grep -oP '^\d+' /var/lib/update-notifier/updates-available 2>/dev/null | head -1 || echo 0)
     fi
     grep -q '"1"' /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null && AUTO_UPD="enabled"
 
-    _L "IP Address"   "$IP"
+    _L "IPv4"         "$IPV4"
+    _L "IPv6"         "$IPV6"
     _L "OS"           "$OS_NAME"
     _L "Kernel"       "$KERNEL"
     _L "Load Average" "Cores: $CORES [$LOAD_AVG]"
@@ -1310,7 +1264,6 @@ show_system_status
 echo -e "${GREEN}${BOLD}  === ВСЁ ГОТОВО! ===${NC}"
 echo ""
 
-# --- Перезагрузка ---
 select_option "Перезагрузить систему?" "Да, перезагрузить" "Нет, позже"
 
 if [ "$SELECTED" -eq 0 ]; then
