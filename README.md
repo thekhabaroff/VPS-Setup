@@ -1,6 +1,8 @@
 <div align="center">
 <h1>🚀 Ubuntu Server Optimization Script v3.0<h1> </div>
 
+**Комплексная автоматическая оптимизация Ubuntu/Debian сервера одной командой**
+
 <div align="center">
 
 ![Bash](https://img.shields.io/badge/Shell-Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)
@@ -13,8 +15,6 @@
 ![Stars](https://img.shields.io/github/stars/thekhabaroff/VPS-Setup?style=for-the-badge)
 ![Last Commit](https://img.shields.io/github/last-commit/thekhabaroff/VPS-Setup?style=for-the-badge)
 ![Issues](https://img.shields.io/github/issues/thekhabaroff/VPS-Setup?style=for-the-badge)
-
-**Комплексная автоматическая оптимизация Ubuntu/Debian сервера одной командой**
 
 [Быстрый старт](#-быстрый-старт) • [Что делает скрипт](#-что-делает-скрипт) • [Режимы работы](#-режимы-работы) • [Требования](#-требования) • [Поддержать проект](#-поддержать-проект)
 
