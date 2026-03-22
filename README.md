@@ -29,17 +29,10 @@
 
 ## ⚡ Быстрый старт
 
-
-# Вариант с wget
 ```bash
 wget https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/refs/heads/main/update.sh
 chmod +x update.sh
 sudo bash update.sh
-```
-
-# Вариант с curl
-```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/refs/heads/main/update.sh)
 ```
 
 > **⚠ Важно:** требует прав `root` или `sudo`. Рекомендуется на свежей системе.
