@@ -1,5 +1,3 @@
-VPS-Setup
-
 # 🚀 Ubuntu Server Optimization Script v3.0
 
 <div align="center">
@@ -9,6 +7,9 @@ VPS-Setup
 ![Debian](https://img.shields.io/badge/Debian-11%2B-A81D33?style=for-the-badge&logo=debian&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
 ![Version](https://img.shields.io/badge/Version-3.0-brightgreen?style=for-the-badge)
+![Stars](https://img.shields.io/github/stars/thekhabaroff/VPS-Setup?style=for-the-badge)
+![Last Commit](https://img.shields.io/github/last-commit/thekhabaroff/VPS-Setup?style=for-the-badge)
+![Issues](https://img.shields.io/github/issues/thekhabaroff/VPS-Setup?style=for-the-badge)
 
 **Комплексная автоматическая оптимизация Ubuntu/Debian сервера одной командой**
 
@@ -27,10 +28,15 @@ VPS-Setup
 ---
 
 ## ⚡ Быстрый старт
+
 ```bash
+# Вариант с wget
 wget https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/refs/heads/main/update.sh
 chmod +x update.sh
-bash update.sh
+sudo bash update.sh
+
+# Вариант с curl
+curl -fsSL https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/refs/heads/main/update.sh | sudo bash
 ```
 
 > **⚠ Важно:** требует прав `root` или `sudo`. Рекомендуется на свежей системе.
@@ -102,10 +108,15 @@ bash update.sh
 ## 🔄 После установки
 
 ```bash
-sudo reboot  # применить ядро XanMod
+# Перезагрузить для применения ядра XanMod
+sudo reboot
 
-uname -r     # проверить ядро
-sysctl net.ipv4.tcp_congestion_control  # должно быть bbr
+# Проверить активное ядро
+uname -r
+
+# Проверить BBR
+sysctl net.ipv4.tcp_congestion_control
+lsmod | grep bbr
 ```
 
 ---
@@ -133,6 +144,8 @@ sysctl net.ipv4.tcp_congestion_control  # должно быть bbr
 ---
 
 ## 🤝 Contributing
+
+Нашёл баг или есть идея? Открой [Issue](../../issues) — разберём вместе.
 
 1. Fork репозитория
 2. `git checkout -b feature/my-feature`
@@ -165,7 +178,7 @@ sysctl net.ipv4.tcp_congestion_control  # должно быть bbr
 </details>
 
 <details>
-<summary><b>💛 TRC</b></summary>
+<summary><b>💚 TRC</b></summary>
 
 ```
 TFGa8KRdcyCv3gk6khGU8NQvR8ot5UtiP5
@@ -183,7 +196,7 @@ UQCacF30U98zSCbzd1NM5qMjjdkTygJwMjgDURobdXTIDN4-
 </details>
 
 <details>
-<summary><b>🐶 SOL</b></summary>
+<summary><b>◎ SOL</b></summary>
 
 ```
 ETdRsuSYgpijG4RFckEQUoLfQ4CctibcoshTKyk1sCoW
@@ -209,6 +222,5 @@ ETdRsuSYgpijG4RFckEQUoLfQ4CctibcoshTKyk1sCoW
 [MIT](LICENSE)
 
 ---
-<div align="center">Если скрипт оказался полезным — поставь ⭐ звезду!</div>
 
-<summary><b>💛 USDT (TRC-20)</b></summary>
+<div align="center">Если скрипт оказался полезным — поставь ⭐ звезду!</div>
