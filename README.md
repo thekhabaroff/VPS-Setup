@@ -192,7 +192,7 @@ UQCacF30U98zSCbzd1NM5qMjjdkTygJwMjgDURobdXTIDN4-
 </details>
 
 <details>
-<summary><b>◎ SOL</b></summary>
+<summary><b>💜 SOL</b></summary>
 
 ```
 ETdRsuSYgpijG4RFckEQUoLfQ4CctibcoshTKyk1sCoW
