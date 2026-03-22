@@ -39,7 +39,7 @@ sudo bash update.sh
 
 # Вариант с curl
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/refs/heads/main/update.sh | sudo bash
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/refs/heads/main/update.sh)
 ```
 
 > **⚠ Важно:** требует прав `root` или `sudo`. Рекомендуется на свежей системе.
