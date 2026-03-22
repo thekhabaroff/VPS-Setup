@@ -1,7 +1,7 @@
 <div align="center">
 <h1>🚀 Ubuntu Server Optimization Script v3.0<h1> </div>
 
-**Комплексная автоматическая оптимизация Ubuntu/Debian сервера одной командой**
+<div align="center"> **Комплексная автоматическая оптимизация Ubuntu/Debian сервера одной командой**</div>
 
 <div align="center">
 
