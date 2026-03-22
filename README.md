@@ -1,5 +1,5 @@
 <div align="center">
-🚀 Ubuntu Server Optimization Script v3.0
+<h1>🚀 Ubuntu Server Optimization Script v3.0<h1>
 </div>
 
 <div align="center">
