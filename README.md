@@ -1,4 +1,4 @@
-# 🚀 Ubuntu Server Optimization Script v3.0
+<div align="center">🚀 Ubuntu Server Optimization Script v3.0
 
 <div align="center">
 
