@@ -29,12 +29,14 @@ VPS-Setup
 ## ⚡ Быстрый старт
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/optimize.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/main/update.sh | sudo bash
+```
 
-# Или вручную
-wget https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/optimize.sh
-chmod +x optimize.sh
-sudo ./optimize.sh
+Или вручную
+```bash
+wget https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/refs/heads/main/update.sh
+chmod +x update.sh
+bash update.sh
 ```
 
 > **⚠ Важно:** требует прав `root` или `sudo`. Рекомендуется на свежей системе.
@@ -152,10 +154,3 @@ sysctl net.ipv4.tcp_congestion_control  # должно быть bbr
 
 ---
 <div align="center">Если скрипт оказался полезным — поставь ⭐ звезду!</div>
-
-
-```bash
-wget https://raw.githubusercontent.com/thekhabaroff/VPS-Setup/refs/heads/main/update.sh
-chmod +x update.sh
-bash update.sh
-```
