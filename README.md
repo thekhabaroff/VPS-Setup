@@ -220,4 +220,4 @@ ETdRsuSYgpijG4RFckEQUoLfQ4CctibcoshTKyk1sCoW
 
 ---
 
-<div align="center">Если скрипт оказался полезным — поставь ⭐ звезду!</div>
+<div align="center">⭐ Поставь звезду, если проект оказался полезным!</div>
